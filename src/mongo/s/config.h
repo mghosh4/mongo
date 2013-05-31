@@ -158,6 +158,8 @@ namespace mongo {
 
         void setPrimary( const std::string& s );
 
+		void resetCM( const string& ns, ChunkManager *cm );
+
         bool load();
         bool reload();
 

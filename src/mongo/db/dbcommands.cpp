@@ -593,7 +593,7 @@ namespace mongo {
             return replSettings.slave == SimpleSlave;
         }
         virtual bool slaveOverrideOk() const { return true; }
-        virtual bool maintenanceOk() const { return false; }
+        virtual bool maintenanceOk() const { return true; }
         virtual bool adminOnly() const { return false; }
         virtual void help( stringstream& help ) const { help << "count objects in collection"; }
         virtual void addRequiredPrivileges(const std::string& dbname,

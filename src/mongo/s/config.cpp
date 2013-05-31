@@ -135,6 +135,14 @@ namespace mongo {
         }
     }
 
+	void DBConfig::resetCM( const string& ns, ChunkManager *cm )
+	{
+		CollectionInfo& ci = _collections[ns];
+		ci.unshard();
+		ci.shard(cm);
+		_save();
+	}
+
     const Shard& DBConfig::getShard( const string& ns ) {
         if ( isSharded( ns ) )
             return Shard::EMPTY;

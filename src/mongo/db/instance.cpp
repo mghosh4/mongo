@@ -620,7 +620,7 @@ namespace mongo {
                 Lock::DBWrite lk(ns);
                 
                 // writelock is used to synchronize stepdowns w/ writes
-                uassert( 10056 ,  "not master", isMasterNs( ns ) );
+                // uassert( 10056 ,  "not master", isMasterNs( ns ) );
                 
                 // if this ever moves to outside of lock, need to adjust check Client::Context::_finishInit
                 if ( ! broadcast && handlePossibleShardedMessage( m , 0 ) )

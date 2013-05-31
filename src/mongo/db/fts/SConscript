@@ -57,26 +57,26 @@ env.StaticLibrary('ftsmongos', [
         ], LIBDEPS=["server_common"])
 
 
-env.CppUnitTest( "fts_index_format_test", "fts_index_format_test.cpp",
-                 LIBDEPS=["base"] )
+#env.CppUnitTest( "fts_index_format_test", "fts_index_format_test.cpp",
+#                 LIBDEPS=["base"] )
 
-env.CppUnitTest( "fts_stop_words_test", "stop_words_test.cpp",
-                 LIBDEPS=["base"] )
+#env.CppUnitTest( "fts_stop_words_test", "stop_words_test.cpp",
+#                 LIBDEPS=["base"] )
 
-env.CppUnitTest( "fts_stemmer_test", "stemmer_test.cpp",
-                 LIBDEPS=["base"] )
+#env.CppUnitTest( "fts_stemmer_test", "stemmer_test.cpp",
+#                 LIBDEPS=["base"] )
 
-env.CppUnitTest( "fts_tokenizer_test", "tokenizer_test.cpp",
-                 LIBDEPS=["base"] )
+#env.CppUnitTest( "fts_tokenizer_test", "tokenizer_test.cpp",
+#                 LIBDEPS=["base"] )
 
-env.CppUnitTest( "fts_query_test", "fts_query_test.cpp",
-                 LIBDEPS=["base"] )
+#env.CppUnitTest( "fts_query_test", "fts_query_test.cpp",
+#                 LIBDEPS=["base"] )
 
-env.CppUnitTest( "fts_spec_test", "fts_spec_test.cpp",
-                 LIBDEPS=["base"] )
+#env.CppUnitTest( "fts_spec_test", "fts_spec_test.cpp",
+#                 LIBDEPS=["base"] )
 
-env.CppUnitTest( "fts_matcher_test", "fts_matcher_test.cpp",
-                 LIBDEPS=["base"] )
+#env.CppUnitTest( "fts_matcher_test", "fts_matcher_test.cpp",
+#                 LIBDEPS=["base"] )
 
-env.CppUnitTest( "fts_util_test", "fts_util_test.cpp",
-                 LIBDEPS=["base","$BUILD_DIR/mongo/mongohasher"] )
+#env.CppUnitTest( "fts_util_test", "fts_util_test.cpp",
+#                 LIBDEPS=["base","$BUILD_DIR/mongo/mongohasher"] )

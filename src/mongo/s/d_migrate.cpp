@@ -52,6 +52,7 @@
 #include "mongo/db/repl_block.h"
 #include "mongo/db/repl/rs.h"
 #include "mongo/db/repl/rs_config.h"
+#include "mongo/db/pdfile.h"
 #include "mongo/s/chunk.h"
 #include "mongo/s/chunk_version.h"
 #include "mongo/s/config.h"
@@ -1490,6 +1491,170 @@ namespace mongo {
         }
 
     } moveChunkCmd;
+
+    /**
+     * this is the main entry for moveData
+     * called to initiate a move
+     * usually by a mongos
+     * this is called on the "to" side
+     */
+    class MoveDataCommand : public Command {
+    public:
+        MoveDataCommand() : Command( "moveData" ) {}
+        virtual void help( stringstream& help ) const {
+            help << "should not be calling this directly";
+        }
+
+        virtual bool slaveOk() const { return true; }
+        virtual bool adminOnly() const { return true; }
+        virtual LockType locktype() const { return NONE; }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::moveData);
+            out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
+        }
+
+        bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
+            // 1.
+            string ns = cmdObj.firstElement().str();
+            string to = cmdObj["to"].str();
+            string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
+			log() << "INSIDE THE CODE" << rsLog;
+			result.append("count", 1);
+
+            // if we do a w=2 after every write
+            bool secondaryThrottle = cmdObj["secondaryThrottle"].trueValue();
+            if ( secondaryThrottle ) {
+                if ( theReplSet ) {
+                    if ( theReplSet->config().getMajority() <= 1 ) {
+                        secondaryThrottle = false;
+                        warning() << "not enough nodes in set to use secondaryThrottle: "
+                                  << " majority: " << theReplSet->config().getMajority()
+                                  << endl;
+                    }
+                }
+                else if ( !anyReplEnabled() ) {
+                    secondaryThrottle = false;
+                    warning() << "secondaryThrottle selected but no replication" << endl;
+                }
+                else {
+                    // master/slave
+                    secondaryThrottle = false;
+                    warning() << "secondaryThrottle not allowed with master/slave" << endl;
+                }
+            }
+
+            BSONObj range  = cmdObj["range"].Obj();
+            BSONElement shardId = cmdObj["shardId"];
+            BSONElement maxSizeElem = cmdObj["maxChunkSizeBytes"];
+
+            if ( ns.empty() ) {
+                errmsg = "need to specify namespace in command";
+                return false;
+            }
+
+            if ( to.empty() ) {
+                errmsg = "need to specify shard to move chunk to";
+                return false;
+            }
+            if ( from.empty() ) {
+                errmsg = "need to specify shard to move chunk from";
+                return false;
+            }
+
+            if ( range.isEmpty() ) {
+                errmsg = "need to specify a range";
+                return false;
+            }
+
+            if ( shardId.eoo() ) {
+                errmsg = "need shardId";
+                return false;
+            }
+
+            if ( maxSizeElem.eoo() || ! maxSizeElem.isNumber() ) {
+                errmsg = "need to specify maxChunkSizeBytes";
+                return false;
+            }
+            //const long long maxChunkSize = maxSizeElem.numberLong(); // in bytes
+
+            if ( ! shardingState.enabled() ) {
+                if ( cmdObj["configdb"].type() != String ) {
+                    errmsg = "sharding not enabled";
+                    return false;
+                }
+                string configdb = cmdObj["configdb"].String();
+                shardingState.enable( configdb );
+                configServer.init( configdb );
+            }
+
+            //MoveTimingHelper timing( "from" , ns , min , max , 6 /* steps */ , errmsg );
+
+            // Make sure we're as up-to-date as possible with shard information
+            // This catches the case where we had to previously changed a shard's host by
+            // removing/adding a shard with the same name
+            Shard::reloadShardInfo();
+
+			// Insert all the data within the range in this shard
+
+			scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
+			
+			scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, range, 0, 0, 0, QueryOption_SlaveOk));
+
+			int count = 0;
+			try
+			{
+				while (cursor->more()) {
+					count++;
+					BSONObj o = cursor->next().getOwned();
+					log() << "DATA: " << o.toString() << rsLog;
+        			{
+            			PageFaultRetryableSection pgrs;
+	            		while ( 1 ) {
+    	            		try {
+								Lock::DBWrite r(ns);
+								Client::Context context(ns);
+								theDataFileMgr.insertAndLog(ns.c_str(), o, false, false);
+                    			break;
+                			}
+                			catch ( PageFaultException& e ) {
+                    			e.touch();
+                			}
+            			}
+        			}	
+				}
+			}
+			catch (DBException e)
+			{
+				result.append("count", count);
+				result.append("inserterror", e.what());
+				return false;
+			}
+
+			log() << "count: " << count << endl;
+
+			//Delete all the data from the source shard
+			try
+			{
+				fromConn->get()->remove(ns, range);
+				string errmsg = fromConn->get()->getLastError();
+				log() << "REMOVEERROR:" << errmsg;
+			}
+			catch (DBException e)
+			{
+				log() << "Exception thrown during removal" << endl;
+				result.append("removeerror", e.what());
+				return false;
+			}
+
+			log() << "Removal Complete" << endl;
+			fromConn->done();
+
+			return true;
+		}
+	}moveDataCmd;
 
     bool ShardingState::inCriticalMigrateSection() {
         return migrateFromStatus.getInCriticalSection();

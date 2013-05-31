@@ -30,6 +30,8 @@
 #include "../dbwebserver.h"
 #include "../../util/mongoutils/html.h"
 #include "../repl_block.h"
+#include "connections.h"
+#include "../../client/connpool.h"
 
 using namespace bson;
 
@@ -283,6 +285,165 @@ namespace mongo {
         }
     } cmdReplSetFreeze;
 
+    class CmdReplSetRemove : public ReplSetCommand {
+    public:
+        virtual void help( stringstream &help ) const {
+            help << "{ replSetRemove : <host> }";
+            help << "'remove' of member from the replica set. For primary it steps down first\n";
+            help << "\nhttp://dochub.mongodb.org/core/replicasetcommands";
+        }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::replSetRemove);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        CmdReplSetRemove() : ReplSetCommand("replSetRemove") { }
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
+			/*if ( cmdObj["replSetRemove"] != String ) {
+				errmsg = "no hostname specified";
+				return false;
+			}*/
+
+			string host = cmdObj["replSetRemove"].String();
+			BSONObj config = theReplSet->getConfig().asBson().getOwned();
+			cout << "CONFIGPRINT:" << config.toString() << "\n";
+
+			string id = config["_id"].String();
+			int version = config["version"].Int();
+			version++;
+			cout << "ID:" << config << "\n";
+
+			vector<BSONElement> members = config["members"].Array();
+			BSONObjBuilder update;
+			update.append("_id", id);
+			update.append("version", version);
+			BSONArrayBuilder newMember(update.subarrayStart("members"));
+			for (vector<BSONElement>::iterator it = members.begin(); it != members.end(); it++)
+			{
+				BSONObj hostObj = (*it).Obj();
+				//printf("HOST: %s\n", host["host"].String().c_str());
+				if (!host.compare(hostObj["host"].String()))
+					continue;
+				newMember.append(*it);
+			}
+
+			newMember.done();
+			BSONObj updateObj = update.done();
+			printf("UPDATE: %s\n", updateObj.toString().c_str());
+
+			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
+			const Member *primary = theReplSet->box.getPrimary();
+			scoped_ptr<ScopedDbConnection> conn(
+				ScopedDbConnection::getInternalScopedDbConnection(primary->fullName()));
+			BSONObj info;
+
+			try
+			{
+				if (!conn->get()->runCommand("admin", cmd, info, 0))
+				{
+					cout << "failed to reconfigure the replica set\n";
+				}
+			}
+			catch(DBException &e) {
+				cout << "Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
+			}
+
+            if( !check(errmsg, result) )
+                return false;
+            
+			return true;
+        }
+    } cmdReplSetRemove;
+
+    class CmdReplSetAdd : public ReplSetCommand {
+    public:
+        virtual void help( stringstream &help ) const {
+            help << "{ {replSetAdd : <host>}, {primary: true} }";
+            help << "'add' member to the replica set. If primary is true then add as primary\n";
+            help << "\nhttp://dochub.mongodb.org/core/replicasetcommands";
+        }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::replSetAdd);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        CmdReplSetAdd() : ReplSetCommand("replSetAdd") { }
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
+			/*if ( cmdObj["replSetAdd"] != String ) {
+				errmsg = "no hostname specified";
+				return false;
+			}*/
+
+			cout << "CMDOBJ:" << cmdObj.toString() << endl;
+			string host = cmdObj["replSetAdd"].String();
+			bool wantPrimary = cmdObj["primary"].Bool();
+			BSONObj config = theReplSet->getConfig().asBson().getOwned();
+			cout << "CONFIGPRINT:" << config.toString() << "\n";
+
+			string id = config["_id"].String();
+			int version = config["version"].Int();
+			version++;
+
+			vector<BSONElement> members = config["members"].Array();
+			BSONObjBuilder update;
+			update.append("_id", id);
+			update.append("version", version);
+			BSONArrayBuilder newMember(update.subarrayStart("members"));
+			int maxID = 0;
+			double maxPr = 0;
+			for (vector<BSONElement>::iterator it = members.begin(); it != members.end(); it++)
+			{
+				BSONObj hostObj = (*it).Obj();
+				cout << "MEMBER:" << hostObj.toString() << endl;
+				newMember.append(*it);
+
+				if (maxID < hostObj["_id"].Int())
+					maxID = hostObj["_id"].Int();
+
+				if (hostObj["priority"].ok() && maxPr < hostObj["priority"].Double())
+					maxPr = hostObj["priority"].Double();
+			}
+
+			if (wantPrimary)
+				newMember.append(BSON("host" << host << "_id" << maxID + 1 << "priority" << maxPr + 1));
+			else
+				newMember.append(BSON("host" << host << "_id" << maxID + 1));
+
+			newMember.done();
+			BSONObj updateObj = update.done();
+			printf("UPDATE: %s\n", updateObj.toString().c_str());
+
+			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
+			const Member *primary = theReplSet->box.getPrimary();
+			scoped_ptr<ScopedDbConnection> conn(
+				ScopedDbConnection::getInternalScopedDbConnection(primary->fullName()));
+			BSONObj info;
+
+			try
+			{
+				if (!conn->get()->runCommand("admin", cmd, info, 0))
+				{
+					cout << "failed to reconfigure the replica set\n";
+				}
+
+				string errmsg = conn->get()->getLastError();
+				cout << "Error:" << errmsg << endl;
+			}
+			catch(DBException &e) {
+				cout << "Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
+			}
+
+            if( !check(errmsg, result) )
+                return false;
+
+            return true;
+        }
+    } cmdReplSetAdd;
+
     class CmdReplSetStepDown: public ReplSetCommand {
     public:
         virtual void help( stringstream &help ) const {
@@ -306,7 +467,7 @@ namespace mongo {
                 errmsg = "not primary so can't step down";
                 return false;
             }
-
+			cout << "MYPRINT: replica set step down called" << endl;
             bool force = cmdObj.hasField("force") && cmdObj["force"].trueValue();
 
             // only step down if there is another node synced to within 10

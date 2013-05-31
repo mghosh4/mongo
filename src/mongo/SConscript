@@ -19,8 +19,8 @@ env.SConscript(['base/SConscript',
                 'db/fts/SConscript',
                 'db/SConscript',
                 'platform/SConscript',
-                's/SConscript',
-                'unittest/SConscript'])
+                's/SConscript'])
+                #'unittest/SConscript'])
 
 def add_exe( v ):
     return "${PROGPREFIX}%s${PROGSUFFIX}" % v
@@ -46,7 +46,7 @@ env.StaticLibrary('foundation',
                            '$BUILD_DIR/third_party/shim_allocator',
                            '$BUILD_DIR/third_party/shim_boost'])
 
-env.CppUnitTest('text_test', 'util/text_test.cpp', LIBDEPS=['foundation'])
+#env.CppUnitTest('text_test', 'util/text_test.cpp', LIBDEPS=['foundation'])
 
 env.StaticLibrary('stringutils', ['util/stringutils.cpp', 'util/base64.cpp',])
 
@@ -54,11 +54,11 @@ env.StaticLibrary('md5', [
         'util/md5.cpp'
         ])
 
-env.CppUnitTest( "md5_test", ["util/md5_test.cpp", "util/md5main.cpp" ],
-                 LIBDEPS=["md5"] )
+#env.CppUnitTest( "md5_test", ["util/md5_test.cpp", "util/md5main.cpp" ],
+#                 LIBDEPS=["md5"] )
 
-env.CppUnitTest( "stringutils_test", [ "util/stringutils_test.cpp" ],
-                 LIBDEPS=["stringutils"] )
+#env.CppUnitTest( "stringutils_test", [ "util/stringutils_test.cpp" ],
+#                 LIBDEPS=["stringutils"] )
 
 env.StaticLibrary('bson', [
         'bson/mutable/mutable_bson.cpp',
@@ -78,50 +78,50 @@ env.StaticLibrary('bson', [
         '$BUILD_DIR/mongo/platform/platform',
         ])
 
-env.CppUnitTest('builder_test', ['bson/util/builder_test.cpp'],
-                LIBDEPS=['bson'])
+#env.CppUnitTest('builder_test', ['bson/util/builder_test.cpp'],
+#                LIBDEPS=['bson'])
 
-env.CppUnitTest('mutable_bson_test', ['bson/mutable/mutable_bson_test.cpp'],
-                 LIBDEPS=['bson'])
+#env.CppUnitTest('mutable_bson_test', ['bson/mutable/mutable_bson_test.cpp'],
+#                 LIBDEPS=['bson'])
 
-env.CppUnitTest('mutable_bson_heap_test', ['bson/mutable/mutable_bson_heap_test.cpp'],
-                 LIBDEPS=['bson'])
+#env.CppUnitTest('mutable_bson_heap_test', ['bson/mutable/mutable_bson_heap_test.cpp'],
+#                 LIBDEPS=['bson'])
 
-env.CppUnitTest('mutable_bson_builder_test', ['bson/mutable/mutable_bson_builder_test.cpp'],
-                LIBDEPS=['bson'])
+#env.CppUnitTest('mutable_bson_builder_test', ['bson/mutable/mutable_bson_builder_test.cpp'],
+#                LIBDEPS=['bson'])
 
-env.CppUnitTest('mutable_bson_algo_test', ['bson/mutable/mutable_bson_algo_test.cpp'],
-                LIBDEPS=['bson'])
+#env.CppUnitTest('mutable_bson_algo_test', ['bson/mutable/mutable_bson_algo_test.cpp'],
+#                LIBDEPS=['bson'])
 
-env.CppUnitTest('safe_num_test', ['util/safe_num_test.cpp'],
-                LIBDEPS=['bson'])
+#env.CppUnitTest('safe_num_test', ['util/safe_num_test.cpp'],
+#                LIBDEPS=['bson'])
 
-env.CppUnitTest('string_map_test', ['util/string_map_test.cpp'],
-                LIBDEPS=['bson','foundation'])
-
-
-env.CppUnitTest('bson_field_test', ['bson/bson_field_test.cpp'],
-                LIBDEPS=['bson'])
-
-env.CppUnitTest('bson_validate_test', ['bson/bson_validate_test.cpp'],
-                LIBDEPS=['bson'])
-
-env.CppUnitTest('namespacestring_test', ['db/namespacestring_test.cpp'],
-                LIBDEPS=['bson'])
-
-env.CppUnitTest('index_set_test', ['db/index_set_test.cpp'],
-                LIBDEPS=['bson','index_set'])
+#env.CppUnitTest('string_map_test', ['util/string_map_test.cpp'],
+#                LIBDEPS=['bson','foundation'])
 
 
-env.CppUnitTest('bson_extract_test', ['bson/util/bson_extract_test.cpp'], LIBDEPS=['bson'])
+#env.CppUnitTest('bson_field_test', ['bson/bson_field_test.cpp'],
+#                LIBDEPS=['bson'])
 
-env.CppUnitTest('descriptive_stats_test',
-                ['util/descriptive_stats_test.cpp'],
-                LIBDEPS=['foundation', 'bson']);
+#env.CppUnitTest('bson_validate_test', ['bson/bson_validate_test.cpp'],
+#                LIBDEPS=['bson'])
 
-env.CppUnitTest('sock_test', ['util/net/sock_test.cpp'],
-                LIBDEPS=['mongocommon', 'notmongodormongos'],
-                NO_CRUTCH=True)
+#env.CppUnitTest('namespacestring_test', ['db/namespacestring_test.cpp'],
+#                LIBDEPS=['bson'])
+
+#env.CppUnitTest('index_set_test', ['db/index_set_test.cpp'],
+#                LIBDEPS=['bson','index_set'])
+
+
+#env.CppUnitTest('bson_extract_test', ['bson/util/bson_extract_test.cpp'], LIBDEPS=['bson'])
+
+#env.CppUnitTest('descriptive_stats_test',
+#                ['util/descriptive_stats_test.cpp'],
+#                LIBDEPS=['foundation', 'bson']);
+
+#env.CppUnitTest('sock_test', ['util/net/sock_test.cpp'],
+#                LIBDEPS=['mongocommon', 'notmongodormongos'],
+#                NO_CRUTCH=True)
 
 env.StaticLibrary( 'mongohasher', [ "db/hasher.cpp" ] )
 
@@ -187,17 +187,17 @@ env.StaticLibrary("processinfo",
                   processInfoFiles,
                   LIBDEPS=["foundation", "bson"])
 
-env.CppUnitTest("processinfo_test",
-                ["util/processinfo_test.cpp"],
-                LIBDEPS=["processinfo"])
+#env.CppUnitTest("processinfo_test",
+#                ["util/processinfo_test.cpp"],
+#                LIBDEPS=["processinfo"])
 
 env.StaticLibrary("server_parameters",
                   ["db/server_parameters.cpp"],
                   LIBDEPS=["foundation","bson"])
 
-env.CppUnitTest("server_parameters_test",
-                [ "db/server_parameters_test.cpp" ],
-                LIBDEPS=["server_parameters"] )
+#env.CppUnitTest("server_parameters_test",
+#                [ "db/server_parameters_test.cpp" ],
+#                LIBDEPS=["server_parameters"] )
 
 
 env.StaticLibrary("fail_point",
@@ -291,10 +291,10 @@ coreServerFiles = [ "db/client_basic.cpp",
                     ]
 
 env.StaticLibrary('ntservice', ['util/ntservice.cpp'], LIBDEPS=['foundation'])
-if windows:
-    env.CppUnitTest('ntservice_test', 'util/ntservice_test.cpp',
-                    LIBDEPS=['ntservice'],
-                    LIBS=['shell32', env['LIBS']])
+#if windows:
+    #env.CppUnitTest('ntservice_test', 'util/ntservice_test.cpp',
+    #                LIBDEPS=['ntservice'],
+    #                LIBS=['shell32', env['LIBS']])
 
 scripting_common_files = [ "scripting/engine.cpp",
                            "scripting/utils.cpp",
@@ -303,8 +303,8 @@ scripting_common_files = [ "scripting/engine.cpp",
 
 env.StaticLibrary('bson_template_evaluator', ["scripting/bson_template_evaluator.cpp"],
                   LIBDEPS=['bson'])
-env.CppUnitTest('bson_template_evaluator_test', ['scripting/bson_template_evaluator_test.cpp'],
-                LIBDEPS=['bson_template_evaluator'])
+#env.CppUnitTest('bson_template_evaluator_test', ['scripting/bson_template_evaluator_test.cpp'],
+#                LIBDEPS=['bson_template_evaluator'])
 
 if usesm:
     env.StaticLibrary('scripting', scripting_common_files + ['scripting/engine_spidermonkey.cpp',
@@ -442,11 +442,11 @@ serverOnlyFiles = [ "db/curop.cpp",
                     "db/driverHelpers.cpp" ]
 
 env.Library( "dbcmdline", "db/cmdline.cpp", LIBDEPS=['bson', 'server_parameters'] )
-env.CppUnitTest('cmdline_test', 'db/cmdline_test.cpp', LIBDEPS=['dbcmdline'])
+#env.CppUnitTest('cmdline_test', 'db/cmdline_test.cpp', LIBDEPS=['dbcmdline'])
 
-env.CppUnitTest('diskloc_test', 'db/diskloc_test.cpp', LIBDEPS=[])
+#env.CppUnitTest('diskloc_test', 'db/diskloc_test.cpp', LIBDEPS=[])
 
-env.CppUnitTest('v8_deadline_monitor_test', 'scripting/v8_deadline_monitor_test.cpp', LIBDEPS=[])
+#env.CppUnitTest('v8_deadline_monitor_test', 'scripting/v8_deadline_monitor_test.cpp', LIBDEPS=[])
 
 env.Library('stacktrace', 'util/stacktrace.cpp')
 
@@ -481,68 +481,69 @@ mongosLibraryFiles = [
     "s/balancer_policy.cpp",
     "s/writeback_listener.cpp",
     "s/version_manager.cpp",
+	"s/oplogreader.cpp",
     ]
 
 env.Library( "mongoscore",
              mongosLibraryFiles,
              LIBDEPS=['db/auth/authmongos',
-                      'db/fts/ftsmongos'
+                      'db/fts/ftsmongos',
                       ] )
 
-env.CppUnitTest( "balancer_policy_test" , [ "s/balancer_policy_tests.cpp" ] ,
-                 LIBDEPS=["mongoscore", "coreshard", "mongocommon","coreserver","coredb","dbcmdline","mongodandmongos"] ,
-                 NO_CRUTCH=True)
+#env.CppUnitTest( "balancer_policy_test" , [ "s/balancer_policy_tests.cpp" ] ,
+#                 LIBDEPS=["mongoscore", "coreshard", "mongocommon","coreserver","coredb","dbcmdline","mongodandmongos"] ,
+#                 NO_CRUTCH=True)
 
-env.CppUnitTest("dbclient_rs_test", [ "client/dbclient_rs_test.cpp" ],
-                 LIBDEPS=[
-                    "coredb",
-                    "coreserver",
-                    "coreshard",
-                    "dbcmdline",
-                    "mocklib",
-                    "mongocommon",
-                    "mongodandmongos",
-                    "mongoscore"],
-                 NO_CRUTCH=True)
+#env.CppUnitTest("dbclient_rs_test", [ "client/dbclient_rs_test.cpp" ],
+#                 LIBDEPS=[
+#                    "coredb",
+#                    "coreserver",
+#                    "coreshard",
+#                    "dbcmdline",
+#                    "mocklib",
+#                    "mongocommon",
+#                    "mongodandmongos",
+#                    "mongoscore"],
+#                 NO_CRUTCH=True)
 
-env.CppUnitTest("scoped_db_conn_test", [ "client/scoped_db_conn_test.cpp" ],
-                 LIBDEPS=[
-                    "coredb",
-                    "coreserver",
-                    "coreshard",
-                    "dbcmdline",
-                    "mongocommon",
-                    "mongodandmongos",
-                    "mongoscore"],
-                 NO_CRUTCH=True)
+#env.CppUnitTest("scoped_db_conn_test", [ "client/scoped_db_conn_test.cpp" ],
+#                 LIBDEPS=[
+#                    "coredb",
+#                    "coreserver",
+#                    "coreshard",
+#                    "dbcmdline",
+#                    "mongocommon",
+#                    "mongodandmongos",
+#                    "mongoscore"],
+#                 NO_CRUTCH=True)
 
-env.CppUnitTest("shard_conn_test", [ "s/shard_conn_test.cpp" ],
-                 LIBDEPS=[
-                    "mongoscore",
-                    "coreshard",
-                    "mongocommon",
-                    "coreserver",
-                    "coredb",
-                    "dbcmdline",
-                    "mongodandmongos",
-                    "mocklib"],
-                 NO_CRUTCH=True)
+#env.CppUnitTest("shard_conn_test", [ "s/shard_conn_test.cpp" ],
+#                 LIBDEPS=[
+#                    "mongoscore",
+#                    "coreshard",
+#                    "mongocommon",
+#                    "coreserver",
+#                    "coredb",
+#                    "dbcmdline",
+#                    "mongodandmongos",
+#                    "mocklib"],
+#                 NO_CRUTCH=True)
 
-env.CppUnitTest("shard_test", [ "s/shard_test.cpp" ],
-                LIBDEPS=[ "mongoscore",
-                          "coreshard",
-                          "mongocommon",
-                          "coreserver",
-                          "coredb",
-                          "dbcmdline",
-                          "mongodandmongos",
-                          "mocklib"],
-                NO_CRUTCH=True)
+#env.CppUnitTest("shard_test", [ "s/shard_test.cpp" ],
+#                LIBDEPS=[ "mongoscore",
+#                          "coreshard",
+#                          "mongocommon",
+#                          "coreserver",
+#                          "coredb",
+#                          "dbcmdline",
+#                          "mongodandmongos",
+#                          "mocklib"],
+#                NO_CRUTCH=True)
 
 
 # Should only need stuff from util, unittest and platform
-env.CppUnitTest("fail_point_test", [ "util/fail_point_test.cpp" ],
-                LIBDEPS=["fail_point"])
+#env.CppUnitTest("fail_point_test", [ "util/fail_point_test.cpp" ],
+#                LIBDEPS=["fail_point"])
 
 serverOnlyFiles += [ "s/d_logic.cpp",
                      "s/d_writeback.cpp",
@@ -565,8 +566,8 @@ env.StaticLibrary("geoquery", [ "db/geo/geoquery.cpp", ],
                               "geometry",
                               '$BUILD_DIR/third_party/s2/s2' ])
 
-env.CppUnitTest("hash_test", [ "db/geo/hash_test.cpp" ], LIBDEPS = ["geometry" ])
-env.CppUnitTest("geoparser_test", [ "db/geo/geoparser_test.cpp" ], LIBDEPS = ["geoparser"])
+#env.CppUnitTest("hash_test", [ "db/geo/hash_test.cpp" ], LIBDEPS = ["geometry" ])
+#env.CppUnitTest("geoparser_test", [ "db/geo/geoparser_test.cpp" ], LIBDEPS = ["geoparser"])
 
 env.StaticLibrary("serveronly", serverOnlyFiles,
                   LIBDEPS=["coreshard",
@@ -618,28 +619,29 @@ mongod = env.Install(
                                 ] + env['MODULE_LIBDEPS_MONGOD'] ) )
 Default( mongod )
 
+#UNCOMMENT: mghosh
 # tools
-allToolFiles = [ "tools/tool.cpp", "tools/stat_util.cpp" ]
-env.StaticLibrary("alltools", allToolFiles, LIBDEPS=["serveronly", "coreserver", "coredb",
-                                                     "notmongodormongos"])
+#allToolFiles = [ "tools/tool.cpp", "tools/stat_util.cpp" ]
+#env.StaticLibrary("alltools", allToolFiles, LIBDEPS=["serveronly", "coreserver", "coredb",
+#                                                     "notmongodormongos"])
 
-normalTools = [ "dump", "restore", "export", "import", "stat", "top", "oplog" ]
-env.Alias( "tools", [ "#/${PROGPREFIX}mongo" + x + "${PROGSUFFIX}" for x in normalTools ] )
-for x in normalTools:
-    env.Install( '#/', env.Program( "mongo" + x, [ "tools/" + x + ".cpp" ],
-                                    LIBDEPS=["alltools"]) )
+#normalTools = [ "dump", "restore", "export", "import", "stat", "top", "oplog" ]
+#env.Alias( "tools", [ "#/${PROGPREFIX}mongo" + x + "${PROGSUFFIX}" for x in normalTools ] )
+#for x in normalTools:
+#    env.Install( '#/', env.Program( "mongo" + x, [ "tools/" + x + ".cpp" ],
+#                                    LIBDEPS=["alltools"]) )
 
-env.StaticLibrary("docgenerator", "tools/docgenerator.cpp")
+#env.StaticLibrary("docgenerator", "tools/docgenerator.cpp")
 
 #some special tools
-env.Install( '#/', [
-        env.Program( "mongofiles", "tools/files.cpp", LIBDEPS=["alltools", "gridfs"] ),
-        env.Program( "docgen", "tools/docgeneratormain.cpp", LIBDEPS=["alltools", "docgenerator"] ),
-        env.Program( "loadgen", "tools/loadgenerator.cpp", LIBDEPS=["alltools", "docgenerator"] ),
-        env.Program( "bsondump", "tools/bsondump.cpp", LIBDEPS=["alltools"]),
-        env.Program( "mongobridge", "tools/bridge.cpp", LIBDEPS=["alltools"]),
-        env.Program( "mongoperf", "client/examples/mongoperf.cpp", LIBDEPS=["alltools"] ),
-        ] )
+#env.Install( '#/', [
+#        env.Program( "mongofiles", "tools/files.cpp", LIBDEPS=["alltools", "gridfs"] ),
+#        env.Program( "docgen", "tools/docgeneratormain.cpp", LIBDEPS=["alltools", "docgenerator"] ),
+#        env.Program( "loadgen", "tools/loadgenerator.cpp", LIBDEPS=["alltools", "docgenerator"] ),
+#        env.Program( "bsondump", "tools/bsondump.cpp", LIBDEPS=["alltools"]),
+#        env.Program( "mongobridge", "tools/bridge.cpp", LIBDEPS=["alltools"]),
+#        env.Program( "mongoperf", "client/examples/mongoperf.cpp", LIBDEPS=["alltools"] ),
+#        ] )
 
 # mongos
 mongos = env.Program(
@@ -658,37 +660,38 @@ env.Library("allclient", "client/clientOnly.cpp", LIBDEPS=["clientandshell"])
 if has_option( "sharedclient" ):
     sharedClientLibName = str( env.SharedLibrary( "mongoclient", [], LIBDEPS=["allclient"] )[0] )
 
+#UNCOMMENT: mghosh
 # dbtests test binary
-env.StaticLibrary('testframework', ['dbtests/framework.cpp'], LIBDEPS=['unittest/unittest'])
+#env.StaticLibrary('testframework', ['dbtests/framework.cpp'], LIBDEPS=['unittest/unittest'])
 
-env.StaticLibrary('mocklib', [
-        'dbtests/mock/mock_conn_registry.cpp',
-        'dbtests/mock/mock_dbclient_connection.cpp',
-        'dbtests/mock/mock_dbclient_cursor.cpp',
-        'dbtests/mock/mock_remote_db_server.cpp',
-        'dbtests/mock/mock_replica_set.cpp'
-    ],
-    LIBDEPS=['mongocommon'])
+#env.StaticLibrary('mocklib', [
+#        'dbtests/mock/mock_conn_registry.cpp',
+#        'dbtests/mock/mock_dbclient_connection.cpp',
+#        'dbtests/mock/mock_dbclient_cursor.cpp',
+#        'dbtests/mock/mock_remote_db_server.cpp',
+#        'dbtests/mock/mock_replica_set.cpp'
+#    ],
+#    LIBDEPS=['mongocommon'])
 
-test = testEnv.Install(
-    '#/',
-    testEnv.Program("test",
-                    [ f for f in Glob("dbtests/*.cpp") if not str(f).endswith('framework.cpp') ],
-                    LIBDEPS = [
-                       "mongocommon",
-                       "serveronly",
-                       "coreserver",
-                       "coredb",
-                       "testframework",
-                       "gridfs",
-                       "notmongodormongos",
-                       "s/upgrade",
-                       "mocklib"]))
+#test = testEnv.Install(
+#    '#/',
+#    testEnv.Program("test",
+#                    [ f for f in Glob("dbtests/*.cpp") if not str(f).endswith('framework.cpp') ],
+#                    LIBDEPS = [
+#                       "mongocommon",
+#                       "serveronly",
+#                       "coreserver",
+#                       "coredb",
+#                       "testframework",
+#                       "gridfs",
+#                       "notmongodormongos",
+#                       "s/upgrade",
+#                       "mocklib"]))
 
-if len(testEnv.subst('$PROGSUFFIX')):
-    testEnv.Alias( "test", "#/${PROGPREFIX}test${PROGSUFFIX}" )
+#if len(testEnv.subst('$PROGSUFFIX')):
+#    testEnv.Alias( "test", "#/${PROGPREFIX}test${PROGSUFFIX}" )
 
-env.Install( '#/', testEnv.Program( "perftest", [ "dbtests/perf/perftest.cpp" ], LIBDEPS=["serveronly", "coreserver", "coredb", "testframework", "notmongodormongos" ] ) )
+#env.Install( '#/', testEnv.Program( "perftest", [ "dbtests/perf/perftest.cpp" ], LIBDEPS=["serveronly", "coreserver", "coredb", "testframework", "notmongodormongos" ] ) )
 
 # --- sniffer ---
 mongosniff_built = False
@@ -775,9 +778,9 @@ def installBinary( e, name ):
     if nix:
         e.AddPostAction( inst, 'chmod 755 $TARGET' )
 
-for t in ["mongo" + x for x in normalTools] + ["mongofiles", "bsondump", "mongoperf" ]:
-    installBinary( env, t )
-    env.Alias("tools", '#/' + add_exe(t))
+#for t in ["mongo" + x for x in normalTools] + ["mongofiles", "bsondump", "mongoperf" ]:
+#    installBinary( env, t )
+#    env.Alias("tools", '#/' + add_exe(t))
 
 env.Alias("tools", "#/" + add_exe("perftest"))
 env.Alias("tools", "#/" + add_exe("mongobridge"))

@@ -26,11 +26,14 @@
 #include "mongo/db/auth/privilege.h"
 #include "mongo/db/dbmessage.h"
 #include "mongo/db/stats/counters.h"
+#include "mongo/db/repl/rs_optime.h"
 #include "mongo/s/chunk.h"
 #include "mongo/s/client_info.h"
 #include "mongo/s/config.h"
+#include "mongo/s/d_logic.h"
 #include "mongo/s/field_parser.h"
 #include "mongo/s/grid.h"
+#include "mongo/db/oplogreader.h"
 #include "mongo/s/strategy.h"
 #include "mongo/s/type_chunk.h"
 #include "mongo/s/type_database.h"
@@ -725,6 +728,748 @@ namespace mongo {
                 return true;
             }
         } shardCollectionCmd;
+
+        class ReShardCollectionCmd : public GridAdminCmd {
+        public:
+            ReShardCollectionCmd() : GridAdminCmd( "reShardCollection" ) {}
+
+            virtual void help( stringstream& help ) const {
+                help
+                        << "Shard a collection with a new key.  Requires new key.  Optional unique. Sharding must already be enabled for the database.\n"
+                        << "  { enablesharding : \"<dbname>\" }\n";
+            }
+            virtual void addRequiredPrivileges(const std::string& dbname,
+                                               const BSONObj& cmdObj,
+                                               std::vector<Privilege>* out) {
+                ActionSet actions;
+                actions.addAction(ActionType::reShardCollection);
+                out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
+            }
+            bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
+                const string ns = cmdObj.firstElement().valuestrsafe();
+                if ( ns.size() == 0 ) {
+                    errmsg = "no ns";
+                    return false;
+                }
+
+                const NamespaceString nsStr( ns );
+                if ( !nsStr.isValid() ){
+                    errmsg = str::stream() << "bad ns[" << ns << "]";
+                    return false;
+                }
+
+                DBConfigPtr config = grid.getDBConfig( ns );
+                if ( ! config->isShardingEnabled() ) {
+                    errmsg = "sharding not enabled for db";
+                    return false;
+                }
+
+                if ( !config->isSharded( ns ) ) {
+                    errmsg = "already not sharded";
+                    return false;
+                }
+
+                BSONObj proposedKey = cmdObj.getObjectField( "key" );
+                if ( proposedKey.isEmpty() ) {
+                    errmsg = "no shard key";
+                    return false;
+                }
+
+                // Currently the allowable shard keys are either
+                // i) a hashed single field, e.g. { a : "hashed" }, or
+                // ii) a compound list of ascending fields, e.g. { a : 1 , b : 1 }
+                if ( proposedKey.firstElementType() == mongo::String ) {
+                    // case i)
+                    if ( !str::equals( proposedKey.firstElement().valuestrsafe() , "hashed" ) ) {
+                        errmsg = "unrecognized string: " + proposedKey.firstElement().str();
+                        return false;
+                    }
+                    if ( proposedKey.nFields() > 1 ) {
+                        errmsg = "hashed shard keys currently only support single field keys";
+                        return false;
+                    }
+                    if ( cmdObj["unique"].trueValue() ) {
+                        // it's possible to ensure uniqueness on the hashed field by
+                        // declaring an additional (non-hashed) unique index on the field,
+                        // but the hashed shard key itself should not be declared unique
+                        errmsg = "hashed shard keys cannot be declared unique.";
+                        return false;
+                    }
+                } else {
+                    // case ii)
+                    BSONForEach(e, proposedKey) {
+                        if (!e.isNumber() || e.number() != 1.0) {
+                            errmsg = str::stream() << "Unsupported shard key pattern.  Pattern must"
+                                                   << " either be a single hashed field, or a list"
+                                                   << " of ascending fields.";
+                            return false;
+                        }
+                    }
+                }
+
+				ChunkManagerPtr manager = grid.getDBConfig(ns)->getChunkManager(ns);
+				ShardKeyPattern shardKeyPattern = manager->getShardKey();
+
+				if (shardKeyPattern.hasShardKey(proposedKey))
+				{
+					errmsg = "shard key already in use";
+					return false;
+				}
+				
+                if ( ns.find( ".system." ) != string::npos ) {
+                    errmsg = "can't shard system namespaces";
+                    return false;
+                }
+
+                if ( ! okForConfigChanges( errmsg ) )
+                    return false;
+
+                //the rest of the checks require a connection to the primary db
+                scoped_ptr<ScopedDbConnection> conn(
+                        ScopedDbConnection::getScopedDbConnection(
+                                        config->getPrimary().getConnString() ) );
+
+                //check that collection is not capped
+                BSONObj res = conn->get()->findOne( config->getName() + ".system.namespaces",
+                                                    BSON( "name" << ns ) );
+                if ( res["options"].type() == Object &&
+                     res["options"].embeddedObject()["capped"].trueValue() ) {
+                    errmsg = "can't shard capped collection";
+                    conn->done();
+                    return false;
+                }
+
+                // The proposed shard key must be validated against the set of existing indexes.
+                // In particular, we must ensure the following constraints
+                //
+                // 1. All existing unique indexes, except those which start with the _id index,
+                //    must contain the proposed key as a prefix (uniqueness of the _id index is
+                //    ensured by the _id generation process or guaranteed by the user).
+                //
+                // 2. If the collection is not empty, there must exist at least one index that
+                //    is "useful" for the proposed key.  A "useful" index is defined as follows
+                //    Useful Index:
+                //         i. contains proposedKey as a prefix
+                //         ii. is not sparse
+                //         iii. contains no null values
+                //         iv. is not multikey (maybe lift this restriction later)
+                //
+                // 3. If the proposed shard key is specified as unique, there must exist a useful,
+                //    unique index exactly equal to the proposedKey (not just a prefix).
+                //
+                // After validating these constraint:
+                //
+                // 4. If there is no useful index, and the collection is non-empty, we
+                //    must fail.
+                //
+                // 5. If the collection is empty, and it's still possible to create an index
+                //    on the proposed key, we go ahead and do so.
+
+                string indexNS = config->getName() + ".system.indexes";
+
+                // 1.  Verify consistency with existing unique indexes
+                BSONObj uniqueQuery = BSON( "ns" << ns << "unique" << true );
+                auto_ptr<DBClientCursor> uniqueQueryResult =
+                                conn->get()->query( indexNS , uniqueQuery );
+
+                ShardKeyPattern proposedShardKey( proposedKey );
+                while ( uniqueQueryResult->more() ) {
+                    BSONObj idx = uniqueQueryResult->next();
+                    BSONObj currentKey = idx["key"].embeddedObject();
+                    if( ! proposedShardKey.isUniqueIndexCompatible( currentKey ) ) {
+                        errmsg = str::stream() << "can't shard collection '" << ns << "' "
+                                               << "with unique index on " << currentKey << " "
+                                               << "and proposed shard key " << proposedKey << ". "
+                                               << "Uniqueness can't be maintained unless "
+                                               << "shard key is a prefix";
+                        conn->done();
+                        return false;
+                    }
+                }
+
+                // 2. Check for a useful index
+                bool hasUsefulIndexForKey = false;
+
+                BSONObj allQuery = BSON( "ns" << ns );
+                auto_ptr<DBClientCursor> allQueryResult =
+                                conn->get()->query( indexNS , allQuery );
+
+                BSONArrayBuilder allIndexes;
+                while ( allQueryResult->more() ) {
+                    BSONObj idx = allQueryResult->next();
+                    allIndexes.append( idx );
+                    BSONObj currentKey = idx["key"].embeddedObject();
+                    // Check 2.i. and 2.ii.
+                    if ( ! idx["sparse"].trueValue() && proposedKey.isPrefixOf( currentKey ) ) {
+                        hasUsefulIndexForKey = true;
+                    }
+                }
+
+                // 3. If proposed key is required to be unique, additionally check for exact match.
+                bool careAboutUnique = cmdObj["unique"].trueValue();
+                if ( hasUsefulIndexForKey && careAboutUnique ) {
+                    BSONObj eqQuery = BSON( "ns" << ns << "key" << proposedKey );
+                    BSONObj eqQueryResult = conn->get()->findOne( indexNS, eqQuery );
+                    if ( eqQueryResult.isEmpty() ) {
+                        hasUsefulIndexForKey = false;  // if no exact match, index not useful,
+                                                       // but still possible to create one later
+                    }
+                    else {
+                        bool isExplicitlyUnique = eqQueryResult["unique"].trueValue();
+                        BSONObj currKey = eqQueryResult["key"].embeddedObject();
+                        bool isCurrentID = str::equals( currKey.firstElementFieldName() , "_id" );
+                        if ( ! isExplicitlyUnique && ! isCurrentID ) {
+                            errmsg = str::stream() << "can't shard collection " << ns << ", "
+                                                   << proposedKey << " index not unique, "
+                                                   << "and unique index explicitly specified";
+                            conn->done();
+                            return false;
+                        }
+                    }
+                }
+
+                if ( hasUsefulIndexForKey ) {
+                    // Check 2.iii and 2.iv. Make sure no null entries in the sharding index
+                    // and that there is a useful, non-multikey index available
+                    BSONObjBuilder cmd;
+                    cmd.append( "checkShardingIndex" , ns );
+                    cmd.append( "keyPattern" , proposedKey );
+                    BSONObj cmdObj = cmd.obj();
+                    if ( ! conn->get()->runCommand( "admin" , cmdObj , res ) ) {
+                        errmsg = res["errmsg"].str();
+                        conn->done();
+                        return false;
+                    }
+                }
+                // 4. if no useful index, and collection is non-empty, fail
+                else if ( conn->get()->count( ns ) != 0 ) {
+                    errmsg = str::stream() << "please create an index that starts with the "
+                                           << "shard key before sharding.";
+                    result.append( "proposedKey" , proposedKey );
+                    result.appendArray( "curIndexes" , allIndexes.done() );
+                    conn->done();
+                    return false;
+                }
+                // 5. If no useful index exists, and collection empty, create one on proposedKey.
+                //    Only need to call ensureIndex on primary shard, since indexes get copied to
+                //    receiving shard whenever a migrate occurs.
+                else {
+                    // call ensureIndex with cache=false, see SERVER-1691
+                    bool ensureSuccess = conn->get()->ensureIndex( ns ,
+                                                                   proposedKey ,
+                                                                   careAboutUnique ,
+                                                                   "" ,
+                                                                   false );
+                    if ( ! ensureSuccess ) {
+                        errmsg = "ensureIndex failed to create index on primary shard";
+                        conn->done();
+                        return false;
+                    }
+                }
+
+                //bool isEmpty = ( conn->get()->count( ns ) == 0 );
+
+                conn->done();
+
+                vector<Shard> shards;
+                Shard primary = config->getPrimary();
+                primary.getAllShards( shards );
+                int numShards = shards.size();
+
+				//TODO: My Code for shard key change comes here
+				// 1. Take a timestamp
+				OpTime startTS[numShards];
+				BSONObj info;
+				for (int i = 0; i < numShards; i++)
+				{	
+                	scoped_ptr<ScopedDbConnection> conn(
+                		ScopedDbConnection::getScopedDbConnection(
+                        	shards[i].getConnString() ) );
+
+					conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
+					string primaryStr = info["primary"].String();
+					oplogReader.connect(primaryStr);
+
+					BSONObj lastOp = oplogReader.getLastOp(rsoplog);
+					OpTime lastOpTS = lastOp["ts"]._opTime();
+
+					startTS[i] = lastOpTS;
+					oplogReader.resetConnection();
+				}
+
+				// 2. Stop the replica
+				string removedReplicas[numShards];
+				replicaStop(ns, removedReplicas);
+				for (int i = 0; i < numShards; i++)
+					cout << "MYCUSTOMPRINT: " << removedReplicas[i].c_str() << endl;
+
+				/*string removedReplicas[] = {
+											"cn73.cloud.cs.illinois.edu:27018",
+											"cn72.cloud.cs.illinois.edu:27018",
+											"cn71.cloud.cs.illinois.edu:27018"};*/
+
+				// 3. Query for all the data
+				vector<BSONObj> data[numShards];
+				int key2_card;
+				queryData(ns, removedReplicas, numShards, shardKeyPattern.key(), proposedKey, data, key2_card);
+				cout << "KEY2 CARDINALITY: " << key2_card << endl;
+
+				// 4. Run the algorithm
+				int numChunk = manager->numChunks();
+				int assignment[numChunk];
+				runAlgorithm(data, key2_card, numChunk, numShards, proposedKey, assignment);
+
+				// 5. Chunk Migration
+				migrateChunk(ns, proposedKey, key2_card, numChunk, assignment, removedReplicas);
+
+				// 6. Collect Oplog
+				// vector<BSONObj> allOps;
+				// collectOplog(ns, startTS, allOps);
+
+				// 7. Replica return as primary
+				replicaReturn(ns, removedReplicas);
+
+				// 8. Update Config DB
+				updateConfig(ns, proposedKey, key2_card, numChunk, assignment);
+				
+				{
+					// Lock::GlobalWrite lk;
+
+					// 9. Replay Oplog
+					// replayOplog(allOps);
+				}
+
+                return true;
+            }
+
+			void collectOplog(string ns, OpTime startTS[], vector<BSONObj> allOps)
+			{
+                vector<Shard> shards;
+                Shard primary = grid.getDBConfig(ns)->getPrimary();
+                primary.getAllShards( shards );
+                int numShards = shards.size();
+
+				BSONObj info;
+				for (int i = 0; i < numShards; i++)
+				{
+                	scoped_ptr<ScopedDbConnection> conn(
+                		ScopedDbConnection::getScopedDbConnection(
+                        	shards[i].getConnString() ) );
+
+					conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
+					string primaryStr = info["primary"].String();
+					oplogReader.connect(primaryStr);
+
+					oplogReader.tailingQueryGTE(rsoplog, startTS[i]);
+					while (oplogReader.more())
+					{
+						BSONObj o = oplogReader.next();
+						printf("OPLOG for Shard %d: %s\n", i, o.toString().c_str());
+
+						allOps.push_back(o);
+					}
+					oplogReader.resetConnection();
+					conn->done();
+				}
+			}
+
+			void replayOplog(vector<BSONObj> allOps)
+			{
+				const char *names[] = {"o", "ns", "op", "b"};
+				BSONElement fields[4];
+				for (vector<BSONObj>::iterator it = allOps.begin(); it != allOps.end(); it++)
+				{
+					it->getFields(4, names, fields);
+					cout << "REPLAY:" << (*it).toString() << endl;
+					const char *optype = fields[2].valuestrsafe();
+					if (!(*optype == 'i' || *optype == 'd' || *optype == 'u'))
+						continue;
+
+					const string ns = fields[1].valuestrsafe();
+					ChunkManagerPtr manager = grid.getDBConfig(ns)->getChunkManager(ns);
+
+					BSONObj o;
+					if (*optype == 'i' || *optype == 'd')
+						o = fields[0].wrap();
+					else if (*optype == 'u')
+						o = (*it)["o2"].Obj();
+					ChunkPtr chunk = manager->findChunkForDoc(o);
+					
+					ShardConnection conn(chunk->getShard(), ns);
+
+					if (*optype == 'i')
+						conn->insert(ns, o);
+					else if (*optype == 'u')
+					{
+						BSONObj update = fields[0].wrap();
+						conn->update(ns, o, update, fields[3].booleanSafe());
+					}
+					else if (*optype == 'd')
+						conn->remove(ns, o, fields[3].booleanSafe());
+
+					string errmsg = conn->getLastError();
+					cout << "Error:" << errmsg << endl;
+				}
+			}
+
+			void queryData(string ns, string replicas[], int numShards, BSONObj oldKey, BSONObj newKey, vector<BSONObj> data[], int &key2_card)
+			{
+				double min = INT_MAX, max = INT_MIN;
+				for (int i = 0; i < numShards; i++)
+				{
+					//Connecting to a removed server
+					try
+					{
+                		scoped_ptr<ScopedDbConnection> conn(
+                			ScopedDbConnection::getInternalScopedDbConnection(
+								replicas[i] ) );
+
+						BSONObjBuilder b;
+						b.appendElements(oldKey);
+						b.appendElements(newKey);
+						BSONObj fields = b.done();
+						scoped_ptr<DBClientCursor> cursor(conn->get()->query(ns, BSONObj(), 0, 0, &fields, QueryOption_SlaveOk));
+						// printf("DATA: Server %d\n", i);
+						while (cursor->more()) {
+							BSONObj output = cursor->next().getOwned();
+							double val = output[newKey.firstElementFieldName()].Double();
+							if (max < val)
+								max = val;
+							if (min > val)
+								min = val;
+							data[i].push_back(output);
+							// printf("DATA: %s\n", output.toString().c_str());
+						}
+						conn->done();
+					}
+					catch (DBException e)
+					{
+						cout << "removing" << " threw exception: " << e.toString() << endl;
+					}
+				}
+				key2_card = (int)ceil(max - min + 1);
+			}
+
+			void runAlgorithm(vector<BSONObj> data[], int key2_card, int numChunk, int numShards, BSONObj proposedKey, int assignment[])
+			{
+				// FIXME: Figure out a way to calculate cardinality
+				int key2_range = (int)ceil((double)key2_card/numChunk);
+				printf("RUNALGORITHM:%d\n", key2_range);
+				int datainkr[numChunk][numShards];
+				for (int i = 0; i < numChunk; i++)
+					for (int j = 0; j < numShards; j++)
+						datainkr[i][j] = 0;
+
+				const char *proposedKeyFN = proposedKey.firstElementFieldName();
+				//printf("PROPOSEDKEYFN:%s\n", proposedKeyFN);
+				for (int i = 0; i < numShards; i++)
+				{
+					//cout << "Server " << i << endl;
+					for (vector<BSONObj>::iterator it = data[i].begin(); it != data[i].end(); it++)
+					{
+						//printf("%s DATA:%s\n", proposedKeyFN, (*it).objdata());
+						if (!(*it).isEmpty() && (*it)[proposedKeyFN].ok())
+						{
+							double newKeyVal = (*it)[proposedKeyFN].Double();
+							int prospectiveChunkPos = (int)floor(newKeyVal / key2_range);
+							datainkr[prospectiveChunkPos][i]++;
+						}
+					}
+				}
+
+				cout << "DATAINKR:" << endl;
+				for (int i = 0; i < numChunk; i++)
+				{
+					for (int j = 0; j < numShards; j++)
+						cout << datainkr[i][j] << "\t";
+					cout << endl;
+				}
+
+				for (int i = 0; i < numChunk; i++)
+				{
+					int max = 0, shard_num = 0;
+					for (int j = 0; j < numShards; j++)
+					{
+						if (max < datainkr[i][j])
+						{
+							max = datainkr[i][j];
+							shard_num = j;
+						}
+					}
+					assignment[i] = shard_num;
+				}
+
+				cout << "ASSIGNMENT:\n";
+				for (int i = 0; i < numChunk; i++)
+					cout << assignment[i] << "\t";
+				cout << "\n";
+			}
+
+			void migrateChunk(const string ns, BSONObj proposedKey, int key2_card, int numChunk, int assignment[], string removedreplicas[])
+			{
+				// Code for bringing down replica
+				BSONObj info;
+                vector<Shard> shards;
+                Shard primary = grid.getDBConfig(ns)->getPrimary();
+                primary.getAllShards( shards );
+                int numShards = shards.size();
+
+				// FIXME: Figure out a way to calculate cardinality
+				int key2_range = (int)ceil((double)key2_card/numChunk);
+				int _min, _max;
+				BSONObj res;
+
+				for (int i = 0; i < numChunk; i++)
+				{
+					_min = i * key2_range;
+					_max = (i + 1) * key2_range;
+					const char *key = proposedKey.firstElement().fieldName();
+					BSONObj range = BSON(key << GTE << _min << LT << _max);
+					printf("RANGE: %s\n", range.toString().c_str());
+
+		 			for (int j = 0; j < numShards; j++)
+					{
+						if (j != assignment[i])
+						{
+                			scoped_ptr<ScopedDbConnection> toconn(
+                				ScopedDbConnection::getScopedDbConnection(
+                        			removedreplicas[assignment[i]] ) );
+                			
+							scoped_ptr<ScopedDbConnection> fromconn(
+                				ScopedDbConnection::getScopedDbConnection(
+                        			removedreplicas[j] ) );
+
+							long long sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
+							long long dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
+
+							cout << "Chunk " << i << " moving data from shard " << j << " to " << assignment[i] << endl;
+							cout << "Source Count: " << sourceCount << " Dest Count: " << dstCount << endl;
+
+							if (sourceCount > 0)
+							{
+								toconn->get()->runCommand( "admin" , 
+								BSON( 	"moveData" << ns << 
+      									"from" << removedreplicas[j] << 
+      									"to" << removedreplicas[assignment[i]] << 
+      									/////////////////////////////// 
+      									"range" << range << 
+      									"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
+      									"shardId" << Chunk::genID(ns, BSON("min" << _min)) << 
+      									"configdb" << configServer.modelServer() << 
+      									"secondaryThrottle" << true 
+      								) ,
+									res
+								);
+								/*if (res["connerror"].ok())
+									cout << "Error:" << res["connerror"].str() << endl;
+								if (res["queryerror"].ok())
+									cout << "Error:" << res["queryerror"].str() << endl;
+								if (res["inserterror"].ok())
+									cout << "Error:" << res["inserterror"].str() << endl;
+								if (res["count"].ok())*/
+									cout << "Count returned:" << res.toString() << endl;
+							}
+							
+							sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
+							dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
+
+							cout << "After Transfer" << endl;
+							cout << "Source Count:" << sourceCount << " Dest Count:" << dstCount << endl;
+
+							toconn->done();
+							fromconn->done();
+						}
+					}
+				}
+			}
+
+			void replicaStop(const string ns, string removedReplicas[])
+			{
+				// Code for bringing down replica
+				BSONObj info;
+                vector<Shard> shards;
+                Shard primary = grid.getDBConfig(ns)->getPrimary();
+                primary.getAllShards( shards );
+                int numShards = shards.size();
+
+				for (int i = 0; i < numShards; i++)
+				{
+					printf("MYCUSTOMPRINT: %s\n", shards[i].getConnString().c_str());
+                	scoped_ptr<ScopedDbConnection> conn(
+                		ScopedDbConnection::getScopedDbConnection(
+                        	shards[i].getConnString() ) );
+
+					conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
+					string primaryStr = info["primary"].String();
+					BSONObjIterator iter(info["hosts"].Obj());
+					while (iter.more())
+					{
+						removedReplicas[i] = iter.next().String();
+						if (primaryStr.compare(removedReplicas[i]))
+							break;
+					}
+					printf("REPLICAREMOVED: %s\n", removedReplicas[i].c_str());
+
+					/*try
+					{
+						conn->get()->runCommand("admin", BSON("replSetStepDown" << 60), info);
+					}
+					catch(DBException &e){
+						cout << "stepping down" << " threw exception: " << e.toString() << endl;
+					}*/
+					
+					try
+					{
+						conn->get()->runCommand("admin", BSON("replSetRemove" << removedReplicas[i]), info);
+					}
+					catch(DBException e){
+						cout << "stepping down" << " threw exception: " << e.toString() << endl;
+					}
+
+					conn->done();
+				}
+			}
+
+			void replicaReturn(const string ns, string removedReplicas[])
+			{
+				// Code for adding back replica
+				BSONObj info;
+                vector<Shard> shards;
+                Shard primary = grid.getDBConfig(ns)->getPrimary();
+                primary.getAllShards( shards );
+                int numShards = shards.size();
+
+				for (int i = 0; i < numShards; i++)
+				{
+					printf("MYCUSTOMPRINT: %s going to add %s\n", shards[i].getConnString().c_str(), removedReplicas[i].c_str());
+                	scoped_ptr<ScopedDbConnection> conn(
+                		ScopedDbConnection::getScopedDbConnection(
+                        	shards[i].getConnString() ) );
+
+					try
+					{
+						conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplicas[i] << "primary" << true), info);
+						string errmsg = conn->get()->getLastError();
+						cout << "Replica Return:" << errmsg << endl;
+					}
+					catch(DBException e){
+						cout << "adding replica" << " threw exception: " << e.toString() << endl;
+					}
+
+					conn->done();
+				}
+			}
+
+			void updateConfig(string ns, BSONObj proposedKey, int key2_card, int numChunk, int assignment[])
+			{
+           		DistributedLock lockSetup( ConnectionString( configServer.getPrimary().getConnString() , ConnectionString::SYNC ) , ns ); 
+           		dist_lock_try dlk; 
+				string errmsg;
+
+           		try{ 
+               		dlk = dist_lock_try( &lockSetup , "Reshard Collection" ); 
+           		}
+           		catch( LockException& e ){ 
+               		errmsg = str::stream() << "error reshard collection " << causedBy( e ); 
+               		return; 
+           		} 
+
+           		if ( ! dlk.got() ) { 
+               		errmsg = str::stream() << "the collection metadata could not be locked with lock "; 
+               		return; 
+           		}
+
+				//Remove all the chunk entries for given ns
+                scoped_ptr<ScopedDbConnection> conn(
+                	ScopedDbConnection::getScopedDbConnection(
+                       	configServer.getPrimary().getConnString() ) );
+
+				BSONObj query = BSON(ChunkType::ns() << ns);
+				auto_ptr<DBClientCursor> cursor(conn->get()->query(ChunkType::ConfigNS, query));
+				cout << "Current Config Contents" << endl;
+                while ( cursor->more() ) {
+                    BSONObj o = cursor->next();
+                    cout << o.toString() << endl;
+                }
+
+				ChunkVersion maxVersion;
+				{
+    				BSONObj x;
+    				try {
+        				x = conn->get()->findOne(ChunkType::ConfigNS,
+                			Query(BSON(ChunkType::ns(ns)))
+                                .sort(BSON(ChunkType::DEPRECATED_lastmod() << -1)));
+
+    				}
+					catch( DBException& e ){
+        				string errmsg = str::stream() << "aborted update config" << causedBy( e );
+        				warning() << errmsg << endl;
+        				return;
+    				}
+					maxVersion = ChunkVersion::fromBSON(x, ChunkType::DEPRECATED_lastmod());
+				}
+
+				try
+				{
+					conn->get()->remove(ChunkType::ConfigNS, query);
+				}
+				catch (DBException e)
+				{
+					cout << "All the chunk metadata could not be removed " << e.what() << endl;
+				}
+
+				cout << "MAXVERSION: " << maxVersion.toString() << endl;
+				maxVersion.incEpoch();
+				maxVersion.incMajor();
+				ChunkManager* cm = new ChunkManager( ns, proposedKey, true );
+
+				cout << "MAXVERSION: " << maxVersion.toString() << endl;
+
+				int key2_range = (int)ceil((double)key2_card/numChunk);
+                vector<Shard> shards;
+                Shard primary = grid.getDBConfig(ns)->getPrimary();
+                primary.getAllShards( shards );
+
+				//Add the new chunk entries
+				for (int i = 0; i < numChunk; i++)
+				{
+					BSONObj min = (i == 0) ? cm->getShardKey().globalMin() : BSON("min" << i * key2_range);
+					BSONObj max = (i == numChunk - 1) ? cm->getShardKey().globalMax() : BSON("max" << (i + 1) * key2_range - 1);
+
+					Chunk temp(cm, min, max, shards[assignment[i]], maxVersion);
+					BSONObjBuilder n;
+					temp.serialize(n);
+                    BSONObj chunkInfo = n.done();
+
+					cout << "New Config Members:" << chunkInfo.toString() << endl;
+
+					try
+					{
+						conn->get()->update(ChunkType::ConfigNS, QUERY(ChunkType::name(temp.genID())), chunkInfo, true, false);
+					}
+					catch (DBException e)
+					{
+						cout << "Insert to chunk metadata failed " << e.what() << endl;
+					}
+					maxVersion.incMinor();
+				}
+
+				auto_ptr<DBClientCursor> cursor1(conn->get()->query(ChunkType::ConfigNS, query));
+				cout << "Current Config Contents" << endl;
+                while ( cursor1->more() ) {
+                    BSONObj o = cursor1->next();
+                    cout << o.toString() << endl;
+                }
+
+				conn->done();
+
+				grid.getDBConfig(ns)->resetCM(ns, cm);
+			}
+
+			private:
+				OplogReader oplogReader;
+
+        } reShardCollectionCmd;
 
         class GetShardVersion : public GridAdminCmd {
         public:

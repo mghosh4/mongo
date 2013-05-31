@@ -186,13 +186,17 @@ namespace {
         clusterAdminRoleWriteActions.addAction(ActionType::inprog);
         clusterAdminRoleWriteActions.addAction(ActionType::killop);
         clusterAdminRoleWriteActions.addAction(ActionType::moveChunk);
+        clusterAdminRoleWriteActions.addAction(ActionType::moveData);
         clusterAdminRoleWriteActions.addAction(ActionType::movePrimary);
         clusterAdminRoleWriteActions.addAction(ActionType::removeShard);
         clusterAdminRoleWriteActions.addAction(ActionType::repairDatabase);
         clusterAdminRoleWriteActions.addAction(ActionType::replSetInitiate);
         clusterAdminRoleWriteActions.addAction(ActionType::replSetReconfig);
+        clusterAdminRoleWriteActions.addAction(ActionType::replSetRemove);
+        clusterAdminRoleWriteActions.addAction(ActionType::replSetAdd);
         clusterAdminRoleWriteActions.addAction(ActionType::resync);
         clusterAdminRoleWriteActions.addAction(ActionType::shardCollection);
+        clusterAdminRoleWriteActions.addAction(ActionType::reShardCollection);
         clusterAdminRoleWriteActions.addAction(ActionType::shardingState);
         clusterAdminRoleWriteActions.addAction(ActionType::split);
         clusterAdminRoleWriteActions.addAction(ActionType::splitChunk);

@@ -61,7 +61,7 @@ namespace mongo {
     }
 
     static void _logOpUninitialized(const char *opstr, const char *ns, const char *logNS, const BSONObj& obj, BSONObj *o2, bool *bb, bool fromMigrate ) {
-        uassert(13288, "replSet error write op to db before replSet initialized", str::startsWith(ns, "local.") || *opstr == 'n');
+        //uassert(13288, "replSet error write op to db before replSet initialized", str::startsWith(ns, "local.") || *opstr == 'n');
     }
 
     /** write an op to the oplog that is already built.
@@ -172,7 +172,7 @@ namespace mongo {
         const OpTime ts = OpTime::now(lk2);
         long long hashNew;
         if( theReplSet ) {
-            massert(13312, "replSet error : logOp() but not primary?", theReplSet->box.getState().primary());
+            //massert(13312, "replSet error : logOp() but not primary?", theReplSet->box.getState().primary());
             hashNew = (theReplSet->lastH * 131 + ts.asLL()) * 17 + theReplSet->selfId();
         }
         else {
