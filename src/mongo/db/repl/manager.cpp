@@ -270,4 +270,106 @@ namespace mongo {
         busyWithElectSelf = false;
     }
 
+    /** called as the health threads get new results */
+    void Manager::msgCheckNewState1() {
+        {
+			cout << "[MYCODE] Inside msgCheckNewState" << endl;
+            theReplSet->assertValid();
+            rs->assertValid();
+
+            RSBase::lock lk(rs);
+
+            if( busyWithElectSelf ) return;
+            
+            checkElectableSet();
+            checkAuth();
+
+            const Member *p = rs->box.getPrimary();
+            if( p && p != rs->_self ) {
+                if( !p->hbinfo().up() ||
+                        !p->hbinfo().hbstate.primary() ) {
+                    p = 0;
+                    rs->box.setOtherPrimary(0);
+                }
+            }
+
+            const Member *p2;
+            {
+                bool two;
+                p2 = findOtherPrimary(two);
+                if( two ) {
+                    /* two other nodes think they are primary (asynchronously polled) -- wait for things to settle down. */
+                    log() << "replSet info two primaries (transiently)" << rsLog;
+					cout << "[MYCODE] replSet info two primaries" << endl;
+                    return;
+                }
+            }
+
+            if( p2 ) {
+                noteARemoteIsPrimary(p2);
+				cout << "[MYCODE] replSet info two primaries" << endl;
+                return;
+            }
+
+            /* didn't find anyone who wants to be primary */
+
+            if( p ) {
+                /* we are already primary */
+
+                if( p != rs->_self ) {
+                    rs->sethbmsg("error p != rs->self in checkNewState");
+                    log() << "replSet " << p->fullName() << rsLog;
+                    log() << "replSet " << rs->_self->fullName() << rsLog;
+					cout << "[MYCODE] we are already primary" << endl;
+                    return;
+                }
+
+                if( rs->elect.shouldRelinquish() ) {
+                    log() << "can't see a majority of the set, relinquishing primary" << rsLog;
+					cout << "[MYCODE] cannot see a majority" << endl;
+                    rs->relinquish();
+                }
+
+                return;
+            }
+
+            if( !rs->iAmPotentiallyHot() ) { // if not we never try to be primary
+                OCCASIONALLY log() << "replSet I don't see a primary and I can't elect myself" << endl;
+				cout << "[MYCODE] cannot elect myself" << endl;
+                return;
+            }
+
+            /* no one seems to be primary.  shall we try to elect ourself? */
+            if( !rs->elect.aMajoritySeemsToBeUp() ) {
+                static time_t last;
+                static int n;
+                int ll = 0;
+                if( ++n > 5 ) ll++;
+                if( last + 60 > time(0 ) ) ll++;
+                LOG(ll) << "replSet can't see a majority, will not try to elect self" << rsLog;
+				cout << "[MYCODE] cannot see a majority, do not elect self" << endl;
+                last = time(0);
+                return;
+            }
+
+            if( !rs->iAmElectable() ) {
+				cout << "[MYCODE] i am not electable" << endl;
+                return;
+            }
+
+            busyWithElectSelf = true; // don't try to do further elections & such while we are already working on one.
+        }
+        try {
+            rs->elect.electSelf();
+        }
+        catch(RetryAfterSleepException&) {
+            /* we want to process new inbounds before trying this again.  so we just put a checkNewstate in the queue for eval later. */
+            requeue();
+        }
+        catch(...) {
+            log() << "replSet error unexpected assertion in rs manager" << rsLog;
+				cout << "[MYCODE] unexpected error" << endl;
+        }
+        busyWithElectSelf = false;
+    }
 }

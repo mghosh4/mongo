@@ -108,6 +108,7 @@ namespace mongo {
         virtual ~Manager();
         void msgReceivedNewConfig(BSONObj);
         void msgCheckNewState();
+        void msgCheckNewState1();
     };
 
     class GhostSync : public task::Server {

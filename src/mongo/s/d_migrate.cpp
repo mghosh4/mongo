@@ -1521,7 +1521,7 @@ namespace mongo {
             string ns = cmdObj.firstElement().str();
             string to = cmdObj["to"].str();
             string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
-			log() << "INSIDE THE CODE" << rsLog;
+			log() << "[MYCODE] INSIDE THE CODE" << rsLog;
 			result.append("count", 1);
 
             // if we do a w=2 after every write
@@ -1609,7 +1609,7 @@ namespace mongo {
 				while (cursor->more()) {
 					count++;
 					BSONObj o = cursor->next().getOwned();
-					log() << "DATA: " << o.toString() << rsLog;
+					log() << "[MYCODE] DATA: " << o.toString() << rsLog;
         			{
             			PageFaultRetryableSection pgrs;
 	            		while ( 1 ) {
@@ -1630,26 +1630,27 @@ namespace mongo {
 			{
 				result.append("count", count);
 				result.append("inserterror", e.what());
+				log() << "[MYCODE] Move Data Error:" << e.what();
 				return false;
 			}
 
-			log() << "count: " << count << endl;
+			log() << "[MYCODE] count: " << count << endl;
 
 			//Delete all the data from the source shard
 			try
 			{
 				fromConn->get()->remove(ns, range);
 				string errmsg = fromConn->get()->getLastError();
-				log() << "REMOVEERROR:" << errmsg;
+				log() << "[MYCODE] REMOVEERROR:" << errmsg;
 			}
 			catch (DBException e)
 			{
-				log() << "Exception thrown during removal" << endl;
+				log() << "[MYCODE] Exception thrown during removal" << endl;
 				result.append("removeerror", e.what());
 				return false;
 			}
 
-			log() << "Removal Complete" << endl;
+			log() << "[MYCODE] Removal Complete" << endl;
 			fromConn->done();
 
 			return true;

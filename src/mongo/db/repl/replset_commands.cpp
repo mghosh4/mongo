@@ -308,12 +308,12 @@ namespace mongo {
 
 			string host = cmdObj["replSetRemove"].String();
 			BSONObj config = theReplSet->getConfig().asBson().getOwned();
-			cout << "CONFIGPRINT:" << config.toString() << "\n";
+			cout << "[MYCODE] ReplSetRemove CONFIGPRINT:" << config.toString() << "\n";
 
 			string id = config["_id"].String();
 			int version = config["version"].Int();
 			version++;
-			cout << "ID:" << config << "\n";
+			cout << "[MYCODE] ReplSetRemove ID:" << config << "\n";
 
 			vector<BSONElement> members = config["members"].Array();
 			BSONObjBuilder update;
@@ -331,7 +331,7 @@ namespace mongo {
 
 			newMember.done();
 			BSONObj updateObj = update.done();
-			printf("UPDATE: %s\n", updateObj.toString().c_str());
+			printf("[MYCODE] ReplSetRemove UPDATE: %s\n", updateObj.toString().c_str());
 
 			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
 			const Member *primary = theReplSet->box.getPrimary();
@@ -343,11 +343,11 @@ namespace mongo {
 			{
 				if (!conn->get()->runCommand("admin", cmd, info, 0))
 				{
-					cout << "failed to reconfigure the replica set\n";
+					cout << "[MYCODE] ReplSetRemove failed to reconfigure the replica set\n";
 				}
 			}
 			catch(DBException &e) {
-				cout << "Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
+				cout << "[MYCODE] ReplSetRemove Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
 			}
 
             if( !check(errmsg, result) )
@@ -378,11 +378,11 @@ namespace mongo {
 				return false;
 			}*/
 
-			cout << "CMDOBJ:" << cmdObj.toString() << endl;
+			cout << "[MYCODE] ReplSetAdd CMDOBJ:" << cmdObj.toString() << endl;
 			string host = cmdObj["replSetAdd"].String();
 			bool wantPrimary = cmdObj["primary"].Bool();
 			BSONObj config = theReplSet->getConfig().asBson().getOwned();
-			cout << "CONFIGPRINT:" << config.toString() << "\n";
+			cout << "[MYCODE] ReplSetAdd CONFIGPRINT:" << config.toString() << "\n";
 
 			string id = config["_id"].String();
 			int version = config["version"].Int();
@@ -394,11 +394,11 @@ namespace mongo {
 			update.append("version", version);
 			BSONArrayBuilder newMember(update.subarrayStart("members"));
 			int maxID = 0;
-			double maxPr = 0;
+			double maxPr = 1;
 			for (vector<BSONElement>::iterator it = members.begin(); it != members.end(); it++)
 			{
 				BSONObj hostObj = (*it).Obj();
-				cout << "MEMBER:" << hostObj.toString() << endl;
+				cout << "[MYCODE] ReplSetAdd MEMBER:" << hostObj.toString() << endl;
 				newMember.append(*it);
 
 				if (maxID < hostObj["_id"].Int())
@@ -415,7 +415,7 @@ namespace mongo {
 
 			newMember.done();
 			BSONObj updateObj = update.done();
-			printf("UPDATE: %s\n", updateObj.toString().c_str());
+			printf("[MYCODE] ReplSetAdd UPDATE: %s\n", updateObj.toString().c_str());
 
 			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
 			const Member *primary = theReplSet->box.getPrimary();
@@ -427,17 +427,19 @@ namespace mongo {
 			{
 				if (!conn->get()->runCommand("admin", cmd, info, 0))
 				{
-					cout << "failed to reconfigure the replica set\n";
+					cout << "[MYCODE] ReplSetAdd failed to reconfigure the replica set\n";
 				}
 
 				string errmsg = conn->get()->getLastError();
-				cout << "Error:" << errmsg << endl;
+				cout << "[MYCODE] ReplSetAdd Error:" << errmsg << endl;
 			}
 			catch(DBException &e) {
-				cout << "Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
+				cout << "[MYCODE] ReplSetAdd Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
 			}
+           
+			//theReplSet->mgr->send( boost::bind(&Manager::msgCheckNewState1, theReplSet->mgr) );
 
-            if( !check(errmsg, result) )
+			if( !check(errmsg, result) )
                 return false;
 
             return true;
@@ -467,7 +469,7 @@ namespace mongo {
                 errmsg = "not primary so can't step down";
                 return false;
             }
-			cout << "MYPRINT: replica set step down called" << endl;
+			cout << "[MYCODE] ReplSetStepDown MYPRINT: replica set step down called" << endl;
             bool force = cmdObj.hasField("force") && cmdObj["force"].trueValue();
 
             // only step down if there is another node synced to within 10

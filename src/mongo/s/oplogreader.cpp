@@ -101,10 +101,10 @@ namespace mongo {
     }
 
     void OplogReader::tailingQueryGTE(const char *ns, OpTime optime, const BSONObj* fields ) {
-        BSONObjBuilder gte;
-        gte.appendTimestamp("$gte", optime.asDate());
+        BSONObjBuilder gt;
+        gt.appendTimestamp("$gt", optime.asDate());
         BSONObjBuilder query;
-        query.append("ts", gte.done());
+        query.append("ts", gt.done());
         tailingQuery(ns, query.done(), fields);
     }
 

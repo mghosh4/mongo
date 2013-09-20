@@ -125,13 +125,16 @@ namespace mongo {
         vector<BSONObj> newTracked;
         // Store epoch now so it doesn't change when we change max
         OID currEpoch = _maxVersion->epoch();
+		cout << "[MYCODE] calculateConfigDiff currEpoch: " << currEpoch.toString() << endl;
 
         _validDiffs = 0;
         while( diffCursor.more() ){
 
             BSONObj diffChunkDoc = diffCursor.next();
+			cout << "[MYCODE] calculateConfigDiff diffChunkDoc: " << diffChunkDoc.toString() << endl;
 
             ChunkVersion chunkVersion = ChunkVersion::fromBSON(diffChunkDoc, ChunkType::DEPRECATED_lastmod());
+			cout << "[MYCODE] calculateConfigDiff chunkVersion: " << chunkVersion.toString() << " " << chunkVersion.isSet() << " " << chunkVersion.hasCompatibleEpoch(currEpoch) << endl;
 
             if( diffChunkDoc[ChunkType::min()].type() != Object ||
                 diffChunkDoc[ChunkType::max()].type() != Object ||
@@ -139,6 +142,7 @@ namespace mongo {
             {
                 warning() << "got invalid chunk document " << diffChunkDoc
                           << " when trying to load differing chunks" << endl;
+				cout << "[MYCODE] Got Invalid chunk documents" << endl;
                 continue;
             }
 
@@ -148,19 +152,25 @@ namespace mongo {
                           << " when trying to load differing chunks at version "
                           << ChunkVersion( _maxVersion->toLong(), currEpoch ) << endl;
 
+				cout << "[MYCODE] Got Invalid chunk documents return -1" << endl;
                 // Don't keep loading, since we know we'll be broken here
                 return -1;
             }
 
             _validDiffs++;
 
+			cout << "[MYCODE] calculateConfigDiff *_maxVersion: " << _maxVersion->toString() << endl;
+
             // Get max changed version and chunk version
             if( chunkVersion > *_maxVersion ) *_maxVersion = chunkVersion;
+			
+			cout << "[MYCODE] calculateConfigDiff *_maxVersion: " << _maxVersion->toString() << endl;
 
             // Chunk version changes
             ShardType shard = shardFor( diffChunkDoc[ChunkType::shard()].String() );
             typename map<ShardType, ChunkVersion>::iterator shardVersionIt = _maxShardVersions->find( shard );
             if( shardVersionIt == _maxShardVersions->end() || shardVersionIt->second < chunkVersion ){
+				cout << "[MYCODE] Updated Shard Version" << endl;
                 (*_maxShardVersions)[ shard ] = chunkVersion;
             }
 
