@@ -1595,7 +1595,7 @@ namespace mongo {
             // Make sure we're as up-to-date as possible with shard information
             // This catches the case where we had to previously changed a shard's host by
             // removing/adding a shard with the same name
-            Shard::reloadShardInfo();
+            // Shard::reloadShardInfo();
 
 			// Insert all the data within the range in this shard
 

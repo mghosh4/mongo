@@ -315,12 +315,12 @@ namespace mongo {
                 nok++;
                 if( i->result["fresher"].trueValue() ) {
                     log() << "not electing self, we are not freshest" << rsLog;
-                    return false;
+                    //return false;
                 }
                 OpTime remoteOrd( i->result["opTime"].Date() );
                 if( remoteOrd == ord )
                     nTies++;
-                verify( remoteOrd <= ord );
+                //verify( remoteOrd <= ord );
 
                 if( i->result["veto"].trueValue() ) {
                     BSONElement msg = i->result["errmsg"];
@@ -331,7 +331,7 @@ namespace mongo {
                     else {
                         log() << "not electing self, " << i->toHost << " would veto" << rsLog;
                     }
-                    return false;
+                    //return false;
                 }
             }
             else {
@@ -340,7 +340,7 @@ namespace mongo {
             }
         }
         LOG(1) << "replSet dev we are freshest of up nodes, nok:" << nok << " nTies:" << nTies << rsLog;
-        verify( ord <= theReplSet->lastOpTimeWritten ); // <= as this may change while we are working...
+        //verify( ord <= theReplSet->lastOpTimeWritten ); // <= as this may change while we are working...
         return true;
     }
 

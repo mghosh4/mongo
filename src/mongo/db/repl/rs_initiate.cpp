@@ -104,8 +104,9 @@ namespace mongo {
                     }
                     else {
                         // Assure no one has a newer config.
-                        if( res["v"].Int() >= cfg.version ) {
-                            uasserted(13341, "member " + i->h.toString() + " has a config version >= to the new cfg version; cannot change config");
+                        if( res["v"].Int() > cfg.version ) {
+							cout << "[MYCODE] Config Version:" << cfg.version << " Version for " << i->h.toString() << ":" << res["v"].Int();
+                            //uasserted(13341, "member " + i->h.toString() + " has a config version >= to the new cfg version; cannot change config");
                         }
                     }
                 }
@@ -133,7 +134,7 @@ namespace mongo {
                         string msg = string("need all members up to initiate, not ok : ") + i->h.toString();
                         if( !initial )
                             msg = string("need most members up to reconfigure, not ok : ") + i->h.toString();
-                        uasserted(13144, msg);
+                        //uasserted(13144, msg);
                     }
                 }
             }

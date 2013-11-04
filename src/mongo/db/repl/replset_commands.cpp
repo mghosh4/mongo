@@ -285,6 +285,66 @@ namespace mongo {
         }
     } cmdReplSetFreeze;
 
+    class CmdGetIdentifier : public ReplSetCommand {
+    public:
+        CmdGetIdentifier() : ReplSetCommand("getIdentifier") { }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::replGetIdentifier);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
+			cout << "[MYCODE] Get Identifier Command called" << endl;
+            if( !check(errmsg, result) )
+                return false;
+
+			vector<ReplSetConfig::MemberCfg> configMembers = theReplSet->config().members;
+			vector<string> hosts;
+			vector<int> ids;
+			for( vector<ReplSetConfig::MemberCfg>::const_iterator i = configMembers.begin(); i != configMembers.end(); i++ ) {
+				cout << "[MYCODE] Host:" << i->h.toString() << " ID:" << i->_id << endl; 
+				hosts.push_back(i->h.toString());
+				ids.push_back(i->_id);
+			}
+
+			result.append("hosts",hosts);
+			result.append("id",ids);
+
+            return true;
+        }
+    } cmdGetIdentifier;
+
+    class CmdReplSetLeader : public ReplSetCommand {
+    public:
+        CmdReplSetLeader() : ReplSetCommand("replSetLeader") { }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::replSetLeader);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
+			cout << "[MYCODE] Replica Set Leader Command called" << endl;
+            if( !check(errmsg, result) )
+                return false;
+
+			try {
+			    theReplSet->elect.electSelf();
+			}
+			catch(RetryAfterSleepException&) {
+			    /* we want to process new inbounds before trying this again.  so we just put a checkNewstate in the queue for eval later. */
+				cout << "[MYCODE] Retry after sleep exception" << endl;
+			}
+			catch(...) {
+			    cout << "[MYCODE] replSet error unexpected assertion in rs manager" << rsLog << endl;
+			}
+            return true;
+        }
+    } cmdReplSetLeader;
+
     class CmdReplSetRemove : public ReplSetCommand {
     public:
         virtual void help( stringstream &help ) const {
@@ -305,15 +365,47 @@ namespace mongo {
 				errmsg = "no hostname specified";
 				return false;
 			}*/
+            if( !check(errmsg, result) )
+                return false;
 
 			string host = cmdObj["replSetRemove"].String();
 			BSONObj config = theReplSet->getConfig().asBson().getOwned();
+			cout << "[MYCODE] ReplSetRemove CMDOBJ:" << cmdObj.toString() << endl;
 			cout << "[MYCODE] ReplSetRemove CONFIGPRINT:" << config.toString() << "\n";
 
 			string id = config["_id"].String();
-			int version = config["version"].Int();
-			version++;
 			cout << "[MYCODE] ReplSetRemove ID:" << config << "\n";
+			int version = config["version"].Int();
+
+			vector<ReplSetConfig::MemberCfg> configMembers = theReplSet->config().members;
+			string myid = theReplSet->config()._id;
+			int max = 0;
+			for( vector<ReplSetConfig::MemberCfg>::const_iterator i = configMembers.begin(); i != configMembers.end(); i++ ) { 
+			    if (i->h.isSelf()) {
+			        continue;
+			    }
+	
+			    BSONObj res;
+			    {
+			        bool ok = false;
+			        try {
+			            int theirVersion = -1000;
+			            ok = requestHeartbeat(myid, "", i->h.toString(), res, -1, theirVersion, false); 
+			            if( max >= theirVersion ) { 
+							max = theirVersion;
+						}
+					}
+					catch(DBException& e) { 
+						log() << "replSet cmufcc requestHeartbeat " << i->h.toString() << " : " << e.toString() << rsLog; 
+               		}
+               		catch(...) { 
+                   		log() << "replSet cmufcc error exception in requestHeartbeat?" << rsLog; 
+               		}
+				}
+			}
+
+			version = max > version ? max : version;
+			version++;
 
 			vector<BSONElement> members = config["members"].Array();
 			BSONObjBuilder update;
@@ -323,9 +415,12 @@ namespace mongo {
 			for (vector<BSONElement>::iterator it = members.begin(); it != members.end(); it++)
 			{
 				BSONObj hostObj = (*it).Obj();
-				//printf("HOST: %s\n", host["host"].String().c_str());
 				if (!host.compare(hostObj["host"].String()))
+				{
+					//result.append("id",hostObj["_id"].Int());
+					//cout << "[MYCODE] Removed Host " << hostObj["host"].String() << " ID:" << result.done().toString() << endl;
 					continue;
+				}
 				newMember.append(*it);
 			}
 
@@ -333,26 +428,31 @@ namespace mongo {
 			BSONObj updateObj = update.done();
 			printf("[MYCODE] ReplSetRemove UPDATE: %s\n", updateObj.toString().c_str());
 
-			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
-			const Member *primary = theReplSet->box.getPrimary();
-			scoped_ptr<ScopedDbConnection> conn(
-				ScopedDbConnection::getInternalScopedDbConnection(primary->fullName()));
 			BSONObj info;
 
 			try
 			{
-				if (!conn->get()->runCommand("admin", cmd, info, 0))
-				{
-					cout << "[MYCODE] ReplSetRemove failed to reconfigure the replica set\n";
-				}
+                scoped_ptr<ReplSetConfig> newConfig
+                        (ReplSetConfig::make(updateObj, true));
+
+                log() << "replSet replSetReconfig config object parses ok, " <<
+                        newConfig->members.size() << " members specified" << rsLog;
+
+                if( !ReplSetConfig::legalChange(theReplSet->getConfig(), *newConfig, errmsg) ) {
+                    return false;
+                }
+
+                checkMembersUpForConfigChange(*newConfig, result, false);
+
+                log() << "replSet replSetReconfig [2]" << rsLog;
+
+                theReplSet->haveNewConfig(*newConfig, true);
+                ReplSet::startupStatusMsg.set("replSetReconfig'd");
 			}
 			catch(DBException &e) {
 				cout << "[MYCODE] ReplSetRemove Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
 			}
 
-            if( !check(errmsg, result) )
-                return false;
-            
 			return true;
         }
     } cmdReplSetRemove;
@@ -377,15 +477,48 @@ namespace mongo {
 				errmsg = "no hostname specified";
 				return false;
 			}*/
+			if( !check(errmsg, result) )
+                return false;
 
 			cout << "[MYCODE] ReplSetAdd CMDOBJ:" << cmdObj.toString() << endl;
-			string host = cmdObj["replSetAdd"].String();
+			string addedHost = cmdObj["replSetAdd"].String();
 			bool wantPrimary = cmdObj["primary"].Bool();
+			int addedHostID = cmdObj["id"].Int();
+
 			BSONObj config = theReplSet->getConfig().asBson().getOwned();
 			cout << "[MYCODE] ReplSetAdd CONFIGPRINT:" << config.toString() << "\n";
 
 			string id = config["_id"].String();
 			int version = config["version"].Int();
+			vector<ReplSetConfig::MemberCfg> configMembers = theReplSet->config().members;
+			string myid = theReplSet->config()._id;
+			int max = 0;
+			for( vector<ReplSetConfig::MemberCfg>::const_iterator i = configMembers.begin(); i != configMembers.end(); i++ ) { 
+			    // we know we're up 
+			    if (i->h.isSelf()) {
+			        continue;
+			    }
+	
+			    BSONObj res;
+			    {
+			        bool ok = false;
+			        try {
+			            int theirVersion = -1000;
+			            ok = requestHeartbeat(myid, "", i->h.toString(), res, -1, theirVersion, false); 
+			            if( max >= theirVersion ) { 
+							max = theirVersion;
+						}
+					}
+					catch(DBException& e) { 
+						log() << "replSet cmufcc requestHeartbeat " << i->h.toString() << " : " << e.toString() << rsLog; 
+               		}
+               		catch(...) { 
+                   		log() << "replSet cmufcc error exception in requestHeartbeat?" << rsLog; 
+               		}
+				}
+			}
+
+			version = max > version ? max : version;
 			version++;
 
 			vector<BSONElement> members = config["members"].Array();
@@ -393,7 +526,6 @@ namespace mongo {
 			update.append("_id", id);
 			update.append("version", version);
 			BSONArrayBuilder newMember(update.subarrayStart("members"));
-			int maxID = 0;
 			double maxPr = 1;
 			for (vector<BSONElement>::iterator it = members.begin(); it != members.end(); it++)
 			{
@@ -401,46 +533,96 @@ namespace mongo {
 				cout << "[MYCODE] ReplSetAdd MEMBER:" << hostObj.toString() << endl;
 				newMember.append(*it);
 
-				if (maxID < hostObj["_id"].Int())
-					maxID = hostObj["_id"].Int();
-
 				if (hostObj["priority"].ok() && maxPr < hostObj["priority"].Double())
 					maxPr = hostObj["priority"].Double();
 			}
 
 			if (wantPrimary)
-				newMember.append(BSON("host" << host << "_id" << maxID + 1 << "priority" << maxPr + 1));
+				newMember.append(BSON("host" << addedHost << "_id" << addedHostID << "priority" << maxPr + 1));
 			else
-				newMember.append(BSON("host" << host << "_id" << maxID + 1));
+				newMember.append(BSON("host" << addedHost << "_id" << addedHostID));
 
 			newMember.done();
 			BSONObj updateObj = update.done();
 			printf("[MYCODE] ReplSetAdd UPDATE: %s\n", updateObj.toString().c_str());
 
-			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
-			const Member *primary = theReplSet->box.getPrimary();
-			scoped_ptr<ScopedDbConnection> conn(
-				ScopedDbConnection::getInternalScopedDbConnection(primary->fullName()));
-			BSONObj info;
-
 			try
 			{
-				if (!conn->get()->runCommand("admin", cmd, info, 0))
+                scoped_ptr<ReplSetConfig> newConfig
+                        (ReplSetConfig::make(updateObj, true));
+
+                log() << "replSet replSetReconfig config object parses ok, " <<
+                        newConfig->members.size() << " members specified" << rsLog;
+
+                if( !ReplSetConfig::legalChange(theReplSet->getConfig(), *newConfig, errmsg) ) {
+                    return false;
+                }
+
+                checkMembersUpForConfigChange(*newConfig, result, false);
+
+                log() << "replSet replSetReconfig [2]" << rsLog;
+
+                theReplSet->haveNewConfig(*newConfig, true);
+                ReplSet::startupStatusMsg.set("replSetReconfig'd");	
+			}
+			catch(DBException &e) {
+				cout << "[MYCODE] ReplSetRemove Trying to remove the host" << addedHost << "threw exception: " << e.toString() << endl;
+			}
+
+			cout << "[MYCODE] Replica Set Current Version:" << theReplSet->config().version << " Local Computed Version:" << version << endl;
+
+			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
+
+			BSONObj info;
+			for( vector<ReplSetConfig::MemberCfg>::const_iterator i = configMembers.begin(); i != configMembers.end(); i++ ) { 
+			
+				string hostStr = i->h.toString();
+				cout << "[MYCODE] Sending replSetReconfig to Host:" << hostStr << endl;
+
+				if (i->h.isSelf())
+					continue;
+				
+				scoped_ptr<ScopedDbConnection> conn(
+					ScopedDbConnection::getInternalScopedDbConnection(hostStr));
+
+				try
+				{
+					if (!conn->get()->runCommand("admin", cmd, info, 0))
+					{
+						cout << "[MYCODE] ReplSetAdd failed to reconfigure the replica set\n";
+					}
+
+					string errmsg = conn->get()->getLastError();
+					cout << "[MYCODE] ReplSetAdd Error:" << errmsg << endl;
+				}
+				catch(DBException &e) {
+					cout << "[MYCODE] ReplSetAdd Trying to add the host " << addedHost << " threw exception: " << e.toString() << endl;
+				}
+
+				conn->done();
+			}
+           
+			scoped_ptr<ScopedDbConnection> hostConn(
+				ScopedDbConnection::getInternalScopedDbConnection(addedHost));
+			try
+			{
+				if (!hostConn->get()->runCommand("admin", cmd, info, 0))
 				{
 					cout << "[MYCODE] ReplSetAdd failed to reconfigure the replica set\n";
 				}
 
-				string errmsg = conn->get()->getLastError();
+				string errmsg = hostConn->get()->getLastError();
 				cout << "[MYCODE] ReplSetAdd Error:" << errmsg << endl;
+				if (wantPrimary)
+				{
+		           	theReplSet->stepDown(120);
+					hostConn->get()->runCommand("admin", BSON("replSetLeader" << 1 << "priority" << maxPr + 1), info, 0);
+				}
 			}
 			catch(DBException &e) {
-				cout << "[MYCODE] ReplSetAdd Trying to remove the host" << host << "threw exception: " << e.toString() << endl;
+				cout << "[MYCODE] ReplSetAdd Trying to add the host " << addedHost << " threw exception: " << e.toString() << endl;
 			}
-           
-			//theReplSet->mgr->send( boost::bind(&Manager::msgCheckNewState1, theReplSet->mgr) );
-
-			if( !check(errmsg, result) )
-                return false;
+			hostConn->done();
 
             return true;
         }

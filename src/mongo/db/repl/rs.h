@@ -352,8 +352,9 @@ namespace mongo {
         set<ReplSetHealthPollTask*> healthTasks;
         void endOldHealthTasks();
         void startHealthTaskFor(Member *m);
-
+	public:
         Consensus elect;
+	private:
         void relinquish();
         void forgetPrimary();
     protected:
@@ -411,7 +412,7 @@ namespace mongo {
         bool iAmElectable() { lock lk(this); return _electableSet.find(_self->id()) != _electableSet.end(); }
         bool isElectable(const unsigned id) { lock lk(this); return _electableSet.find(id) != _electableSet.end(); }
         Member* getMostElectable();
-    protected:
+    public:
         /**
          * Load a new config as the replica set's main config.
          *
@@ -426,6 +427,7 @@ namespace mongo {
          *    change isn't strictly additive)
          */
         bool initFromConfig(ReplSetConfig& c, bool reconf=false); 
+	protected:
         void _fillIsMaster(BSONObjBuilder&);
         void _fillIsMasterHost(const Member*, vector<string>&, vector<string>&, vector<string>&);
         const ReplSetConfig& config() { return *_cfg; }

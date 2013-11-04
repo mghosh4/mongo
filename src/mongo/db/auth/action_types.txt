@@ -72,6 +72,8 @@
 "replSetReconfig",
 "replSetRemove",
 "replSetAdd",
+"replSetLeader",
+"replGetIdentifier",
 "replSetStepDown",
 "replSetSyncFrom",
 "resync",
