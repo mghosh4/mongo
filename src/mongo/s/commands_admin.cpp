@@ -39,6 +39,7 @@
 #include "mongo/s/type_chunk.h"
 #include "mongo/s/type_database.h"
 #include "mongo/s/type_shard.h"
+#include "mongo/s/type_settings.h"
 #include "mongo/s/writeback_listener.h"
 #include "mongo/util/net/listen.h"
 #include "mongo/util/net/message.h"
@@ -747,6 +748,7 @@ namespace mongo {
                 out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
             }
             bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
+				Timer t;
                 const string ns = cmdObj.firstElement().valuestrsafe();
                 if ( ns.size() == 0 ) {
                     errmsg = "no ns";
@@ -968,9 +970,15 @@ namespace mongo {
                     }
                 }
 
-                //bool isEmpty = ( conn->get()->count( ns ) == 0 );
-
-                conn->done();
+				//Disable the balancer
+				try { 
+					// look for the stop balancer marker 
+					conn->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << false )) ); 
+				}
+				catch( DBException& e ){ 
+					conn->done();
+					return false; 
+				}
 
                 vector<Shard> shards;
                 Shard primary = grid.getDBConfig(ns)->getPrimary();
@@ -1028,13 +1036,18 @@ namespace mongo {
 					primaryReplicas[i] = replicaSets[numHosts - 1][i];
 
 				OpTime currTS[numShards];
+				log() << "[MYCODE] Stopping first set of hosts" << endl;
 				replicaStop(ns, shards, removedReplicas, primaryReplicas, currTS, true);
 
+				log() << "[MYCODE] Reconfiguring first set of hosts" << endl;
 				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg);
 				if (!success)
+				{
+					conn->done();
 					return false;
+				}
 
-				cout << "[MYCODE] Checking Timestamp before starting secondaries" << endl;
+				log() << "[MYCODE] Checking Timestamp before starting secondaries" << endl;
 
 				OpTime newTS[numShards];
 				checkTimestamp(removedReplicas, numShards, newTS);
@@ -1044,6 +1057,7 @@ namespace mongo {
 
 				for (int j = 1; j < numHosts; j++)
 				{
+					log() << "[MYCODE] Stopping set of replicas" << endl;
 					cout << "[MYCODE] Stopping replicas:";
 					for (int i = 0; i < numShards; i++)
 					{
@@ -1057,6 +1071,7 @@ namespace mongo {
 
 				for (int j = 1; j < numHosts; j++)
 				{
+					log() << "[MYCODE] Stopping set of replicas" << endl;
 					cout << "[MYCODE] Reconfiguring replicas:";
 					for (int i = 0; i < numShards; i++)
 					{
@@ -1067,10 +1082,25 @@ namespace mongo {
 
 					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg);
 					if (!success)
+					{
+                		conn->done();
 						return false;
+					}
 				}
 				
 				delete[] replicaSets;
+				result.append("millis", t.millis());
+
+				//Disable the balancer
+				try { 
+					// look for the stop balancer marker 
+					conn->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << true )) ); 
+				}
+				catch( DBException& e ){ 
+					conn->done();
+					return false; 
+				}
+                conn->done();
 				return true;
 			}
 
@@ -1089,20 +1119,23 @@ namespace mongo {
 				try {
 					// 3. Query for all the data
 					vector<BSONObj> data[numShards];
+					log() << "[MYCODE] Querying for all the data" << endl;
 					queryData(ns, removedReplicas, numShards, shardKeyPattern.key(), proposedKey, data, key2_card);
 					cout << "[MYCODE] KEY2 CARDINALITY: " << key2_card << endl;
 
 					// 4. Run the algorithm
+					log() << "[MYCODE] Running the algorithm" << endl;
 					runAlgorithm(data, key2_card, numChunk, numShards, proposedKey, assignment);
 
 					// 5. Chunk Migration
+					log() << "[MYCODE] Migrating Chunk" << endl;
 					migrateChunk(ns, proposedKey, key2_card, numChunk, assignment, shards, removedReplicas);
 
 					int iteration = 0;
 
 					while (iteration <= 10)
 					{
-						cout << "[MYCODE] One iteration of oplog replay" << endl;
+						log() << "[MYCODE] One iteration of oplog replay" << endl;
 
 						// 6. Collect Oplog
 						vector<BSONObj> allOps;
@@ -1129,6 +1162,7 @@ namespace mongo {
 				}
 
 				// 8. Replica return as primary
+				log() << "[MYCODE] Replica Return" << endl;
 				replicaReturn(ns, shards, removedReplicas, primary, hostIDMap, configUpdate);
 
 				//Shard::reloadShardInfo();
@@ -1136,6 +1170,7 @@ namespace mongo {
 				if (configUpdate)
 				{
 					// 9. Update Config DB
+					log() << "[MYCODE] Update Config" << endl;
 					updateConfig(ns, proposedKey, key2_card, numChunk, assignment);
 				}
 
@@ -1216,36 +1251,11 @@ namespace mongo {
 
 			void collectOplog(string ns, vector<Shard> shards, OpTime startTS[], vector<BSONObj>& allOps, string primary[])
 			{
-                vector<Shard> newShards;
-                Shard cprimary = grid.getDBConfig(ns)->getPrimary();
-                cprimary.getAllShards( newShards );
-                int numShards = newShards.size();
-				for (int i = 0; i < numShards; i++)
-					cout << "[MYCODE] Shard Info: " << newShards[i].toString() << endl;
-
-				// Accounting for change in order
-				OpTime newCurrTS[numShards];
-
-				for (int i = 0; i < numShards; i++)
-				{
-					for (int j = 0; j < numShards; j++)
-					{
-						if (!newShards[i].getName().compare(shards[j].getName()))
-						{
-							newCurrTS[i] = startTS[j];
-						}
-					}
-				}
+                int numShards = shards.size();
 
 				BSONObj info;
 				for (int i = 0; i < numShards; i++)
 				{
-                	scoped_ptr<ScopedDbConnection> conn(
-                		ScopedDbConnection::getScopedDbConnection(
-                        	newShards[i].getConnString() ) );
-
-					//conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
-					//string primaryStr = info["primary"].String();
 					oplogReader.connect(primary[i]);
 
 					oplogReader.tailingQueryGTE(rsoplog, startTS[i]);
@@ -1259,7 +1269,6 @@ namespace mongo {
 						allOps.push_back(o);
 					}
 					oplogReader.resetConnection();
-					conn->done();
 				}
 			}
 

@@ -1616,7 +1616,7 @@ namespace mongo {
     	            		try {
 								Lock::DBWrite r(ns);
 								Client::Context context(ns);
-								theDataFileMgr.insertAndLog(ns.c_str(), o, false, false);
+								theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
                     			break;
                 			}
                 			catch ( PageFaultException& e ) {
