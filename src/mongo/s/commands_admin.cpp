@@ -962,7 +962,7 @@ namespace mongo {
                                                                    proposedKey ,
                                                                    careAboutUnique ,
                                                                    "" ,
-                                                                   false );
+                                                                  false );
                     if ( ! ensureSuccess ) {
                         errmsg = "ensureIndex failed to create index on primary shard";
                         conn->done();
@@ -970,14 +970,32 @@ namespace mongo {
                     }
                 }
 
-				//Disable the balancer
+		        conn->done();
+
+                // 1. Calculate the splits for the new shard key
+                cout << "[MYCODE] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\n";
+                BSONObjSet splitPoints;
+                int numChunk = manager->numChunks();
+                pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize/2, numChunk - 1, 0);
+
+                for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
+                    cout << "[MYCODE] Split Points:" << it->toString() << endl;
+
+		        scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
+                        configServer.getPrimary().getConnString() ) ); 
+
+				//2. Disable the balancer
 				try { 
-					// look for the stop balancer marker 
-					conn->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << false )) ); 
+					// look for the stop balancer marker
+					BSONObj b1 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
+					cout << "[MYCODE] BEFORE UPDATE:" << b1.toString();
+					conn1->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << true )) );
+					BSONObj b2 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
+					cout << "[MYCODE] AFTER UPDATE:" << b2.toString();
 				}
-				catch( DBException& e ){ 
-					conn->done();
-					return false; 
+				catch( DBException& e ){
+					conn1->done();
+					return false;
 				}
 
                 vector<Shard> shards;
@@ -987,9 +1005,7 @@ namespace mongo {
 				for (int i = 0; i < numShards; i++)
 					cout << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
 
-				//TODO: My Code for shard key change comes here
-
-				// 0. create replica sets
+				// 3. create replica sets
                 scoped_ptr<ScopedDbConnection> shardconn(
                 	ScopedDbConnection::getScopedDbConnection(
                        	shards[0].getConnString() ) );
@@ -1037,17 +1053,17 @@ namespace mongo {
 
 				OpTime currTS[numShards];
 				log() << "[MYCODE] Stopping first set of hosts" << endl;
-				replicaStop(ns, shards, removedReplicas, primaryReplicas, currTS, true);
+				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
 
 				log() << "[MYCODE] Reconfiguring first set of hosts" << endl;
-				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg);
+				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints);
 				if (!success)
 				{
 					conn->done();
 					return false;
 				}
 
-				log() << "[MYCODE] Checking Timestamp before starting secondaries" << endl;
+				/*log() << "[MYCODE] Checking Timestamp before starting secondaries" << endl;
 
 				OpTime newTS[numShards];
 				checkTimestamp(removedReplicas, numShards, newTS);
@@ -1066,7 +1082,7 @@ namespace mongo {
 					}
 					cout << endl;
 
-					replicaStop(ns, shards, removedReplicas, primaryReplicas, currTS, false);
+					replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, false);
 				}
 
 				for (int j = 1; j < numHosts; j++)
@@ -1080,56 +1096,93 @@ namespace mongo {
 					}
 					cout << endl;
 
-					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg);
+					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints);
 					if (!success)
 					{
                 		conn->done();
 						return false;
 					}
-				}
+				}*/
 				
 				delete[] replicaSets;
 				result.append("millis", t.millis());
 
 				//Disable the balancer
-				try { 
+				try {
 					// look for the stop balancer marker 
-					conn->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << true )) ); 
+					BSONObj b3 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
+					cout << b3.toString(); 
+					conn1->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << false )) ); 
+					BSONObj b4 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
+					cout << b4.toString(); 
 				}
 				catch( DBException& e ){ 
 					conn->done();
 					return false; 
 				}
-                conn->done();
+                conn1->done();
 				return true;
 			}
 
-			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg)
-			{
+            void pickSplitVector( BSONObjSet& splitPoints, const string ns, BSONObj shardKey, BSONObj min, BSONObj max, int chunkSize /* bytes */, int maxPoints, int maxObjs ) const {
+                // Ask the mongod holding this chunk to figure out the split points.
                 vector<Shard> newShards;
                 Shard newprimary = grid.getDBConfig(ns)->getPrimary();
                 newprimary.getAllShards( newShards );
                 int numShards = newShards.size();
 
-				int key2_card;
-				ChunkManagerPtr manager = grid.getDBConfig(ns)->getChunkManager(ns);
-				ShardKeyPattern shardKeyPattern = manager->getShardKey();
-				int numChunk = manager->numChunks();
+                for (int i = 0; i < numShards; i++)
+                {
+                    cout << "[MYCODE] Pick split Vector\n";
+                    DBConfigPtr config = grid.getDBConfig( ns , false );
+                    scoped_ptr<ScopedDbConnection> conn(
+                            ScopedDbConnection::getInternalScopedDbConnection( newShards[i].getConnString() ) );
+                    BSONObj result;
+                    BSONObjBuilder cmd;
+                    cmd.append( "splitVector" , ns );
+                    cmd.append( "keyPattern" , shardKey );
+                    cmd.append( "min" , min );
+                    cmd.append( "max" , max );
+                    cmd.append( "maxChunkSizeBytes" , chunkSize );
+                    cmd.append( "maxSplitPoints" , maxPoints );
+                    cmd.append( "maxChunkObjects" , maxObjs );
+                    cmd.appendBool( "reShard" , true);
+                    BSONObj cmdObj = cmd.obj();
+        
+                    if ( ! conn->get()->runCommand( "admin" , cmdObj , result )) {
+                        conn->done();
+                        cout << "[MYCODE] Pick split Vector cmd failed\n";
+                        return;
+                    }
+        
+                    cout << "[MYCODE] Pick split Vector cmd done\n";
+                    BSONObjIterator it( result.getObjectField( "splitKeys" ) );
+                    while ( it.more() ) {
+                        splitPoints.insert( it.next().Obj().getOwned() );
+                    }
+                    conn->done();
+                }
+            }
+
+			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints)
+			{
+                int numShards = shards.size();
+				int numChunk = splitPoints.size() + 1;
 				int assignment[numChunk];
 				try {
 					// 3. Query for all the data
-					vector<BSONObj> data[numShards];
-					log() << "[MYCODE] Querying for all the data" << endl;
-					queryData(ns, removedReplicas, numShards, shardKeyPattern.key(), proposedKey, data, key2_card);
-					cout << "[MYCODE] KEY2 CARDINALITY: " << key2_card << endl;
+					//vector<BSONObj> data[numShards];
+					//log() << "[MYCODE] Querying for all the data" << endl;
+					//queryData(ns, removedReplicas, numShards, shardKeyPattern.key(), proposedKey, data, key2_card);
+					//cout << "[MYCODE] KEY2 CARDINALITY: " << key2_card << endl;
 
 					// 4. Run the algorithm
 					log() << "[MYCODE] Running the algorithm" << endl;
-					runAlgorithm(data, key2_card, numChunk, numShards, proposedKey, assignment);
+					runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
 
 					// 5. Chunk Migration
-					log() << "[MYCODE] Migrating Chunk" << endl;
-					migrateChunk(ns, proposedKey, key2_card, numChunk, assignment, shards, removedReplicas);
+					/*log() << "[MYCODE] Migrating Chunk" << endl;
+					migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
 
 					int iteration = 0;
 
@@ -1150,12 +1203,12 @@ namespace mongo {
 						// 7. Replay Oplog
 						replayOplog(allOps, proposedKey, key2_card, numChunk, assignment, removedReplicas);
 						iteration++;
-					}
+					}*/
 				}
 				catch(DBException e)
 				{
 					// 8. Replica return as primary
-					replicaReturn(ns, shards, removedReplicas, primary, hostIDMap, configUpdate);
+					replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
 
 					errmsg = e.what();
 					return false;
@@ -1163,16 +1216,16 @@ namespace mongo {
 
 				// 8. Replica return as primary
 				log() << "[MYCODE] Replica Return" << endl;
-				replicaReturn(ns, shards, removedReplicas, primary, hostIDMap, configUpdate);
+				replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
 
 				//Shard::reloadShardInfo();
 
-				if (configUpdate)
+				/*if (configUpdate)
 				{
 					// 9. Update Config DB
 					log() << "[MYCODE] Update Config" << endl;
 					updateConfig(ns, proposedKey, key2_card, numChunk, assignment);
-				}
+				}*/
 
                 return true;
             }
@@ -1340,7 +1393,7 @@ namespace mongo {
 				}
 			}
 
-			void queryData(string ns, string replicas[], int numShards, BSONObj oldKey, BSONObj newKey, vector<BSONObj> data[], int &key2_card)
+			/*void queryData(string ns, string replicas[], int numShards, BSONObj oldKey, BSONObj newKey, vector<BSONObj> data[], int &key2_card)
 			{
 				double min = INT_MAX, max = INT_MIN;
 				for (int i = 0; i < numShards; i++)
@@ -1376,34 +1429,52 @@ namespace mongo {
 					}
 				}
 				key2_card = (int)ceil(max - min + 1);
-			}
+			}*/
 
-			void runAlgorithm(vector<BSONObj> data[], int key2_card, int numChunk, int numShards, BSONObj proposedKey, int assignment[])
+			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
 			{
-				// FIXME: Figure out a way to calculate cardinality
-				int key2_range = (int)ceil((double)key2_card/numChunk);
-				printf("[MYCODE] RUNALGORITHM:%d\n", key2_range);
-				int datainkr[numChunk][numShards];
+				printf("[MYCODE] RUNALGORITHM\n");
+				long long datainkr[numChunk][numShards];
 				for (int i = 0; i < numChunk; i++)
 					for (int j = 0; j < numShards; j++)
 						datainkr[i][j] = 0;
 
-				const char *proposedKeyFN = proposedKey.firstElementFieldName();
-				//printf("PROPOSEDKEYFN:%s\n", proposedKeyFN);
-				for (int i = 0; i < numShards; i++)
-				{
-					//cout << "Server " << i << endl;
-					for (vector<BSONObj>::iterator it = data[i].begin(); it != data[i].end(); it++)
-					{
-						//printf("%s DATA:%s\n", proposedKeyFN, (*it).objdata());
-						if (!(*it).isEmpty() && (*it)[proposedKeyFN].ok())
-						{
-							double newKeyVal = (*it)[proposedKeyFN].Double();
-							int prospectiveChunkPos = (int)floor(newKeyVal / key2_range);
-							datainkr[prospectiveChunkPos][i]++;
-						}
-					}
-				}
+			    const char *key = proposedKey.firstElement().fieldName();
+                BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
+                BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
+                for (int i = 0; i < numShards; i++)
+                {
+                	scoped_ptr<ScopedDbConnection> conn(
+                		ScopedDbConnection::getInternalScopedDbConnection(
+							replicas[i] ) );
+
+                    long long total = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+                    cout << "[MYCODE] Shard " << i << " count:" << total << endl;
+
+                    BSONObjSet::iterator it = splitPoints.begin();
+                    BSONObj prev;
+                    for (int j = 0; j < numChunk; j++)
+                    {
+                        BSONObj min = j > 0 ? prev : globalMin;
+                        BSONObj max = j == numChunk - 1 ? globalMax : *it;
+
+                        BSONObj range = getRangeAsBSON(key, min, max);
+                        cout << "[MYCODE] Range:" << range.toString() << endl;
+                        try
+                        {
+						    datainkr[j][i] = conn->get()->count(ns, range, QueryOption_SlaveOk);
+                        }
+                        catch(DBException e)
+                        {
+                            cout << "[MYCODE] Exception trying to populate datainkr: " << e.what() << endl;
+                        }
+
+                        prev = *it;
+                        it++;
+                    }
+
+                    conn->done();
+                }
 
 				cout << "[MYCODE] DATAINKR:" << endl;
 				for (int i = 0; i < numChunk; i++)
@@ -1434,9 +1505,30 @@ namespace mongo {
 				cout << "\n";
 			}
 
-			void migrateChunk(const string ns, BSONObj proposedKey, int key2_card, int numChunk, int assignment[], vector<Shard> shards, string removedReplicas[])
+            BSONObj getRangeAsBSON(const char* key, BSONObj min, BSONObj max)
+            {
+                BSONElement minElem = min[key];
+                BSONElement maxElem = max[key];
+
+                BSONObjBuilder b;
+                BSONObjBuilder sub(b.subobjStart(key));
+                if (minElem.type() == MinKey)
+                    sub.appendAs(maxElem, "$lt");
+                else if (maxElem.type() == MaxKey)
+                    sub.appendAs(minElem, "$gt");
+                else
+                {
+                    sub.appendAs(minElem, "$gte");
+                    sub.appendAs(maxElem, "lt");
+                }
+
+                BSONObj subObj = sub.done();
+                BSONObj range = b.done().getOwned();
+                return range;
+            }
+
+			void migrateChunk(const string ns, BSONObj proposedKey, BSONObjSet splitPoints, int numChunk, int assignment[], vector<Shard> shards, string removedReplicas[])
 			{
-				// Code for bringing down replica
                 vector<Shard> newShards;
                 Shard primary = grid.getDBConfig(ns)->getPrimary();
                 primary.getAllShards( newShards );
@@ -1456,19 +1548,20 @@ namespace mongo {
 					}
 				}
 
-				ChunkManagerPtr manager = grid.getDBConfig(ns)->getChunkManager(ns);
-				// FIXME: Figure out a way to calculate cardinality
-				int key2_range = (int)ceil((double)key2_card/numChunk);
-				int _min, _max;
 				vector<shared_ptr<boost::thread> > migrateThreads;
+
+				const char *key = proposedKey.firstElement().fieldName();
+                BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
+                BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
+                BSONObjSet::iterator it = splitPoints.begin();
+                BSONObj prev;
 
 				for (int i = 0; i < numChunk; i++)
 				{
-					_min = i * key2_range;
-					_max = (i + 1) * key2_range;
-					const char *key = proposedKey.firstElement().fieldName();
-					BSONObj range = BSON(key << GTE << _min << LT << _max);
-					printf("[MYCODE] RANGE: %s\n", range.toString().c_str());
+                    BSONObj min = i > 0 ? prev : globalMin;
+                    BSONObj max = i == numChunk - 1 ? globalMax : *it;
+                    BSONObj range = getRangeAsBSON(key, min, max);
+                    cout << "[MYCODE] Range:" << range.toString() << endl;
 
 		 			for (int j = 0; j < numShards; j++)
 					{
@@ -1485,10 +1578,13 @@ namespace mongo {
 							if (sourceCount > 0)
 							{
 								migrateThreads.push_back(shared_ptr<boost::thread>(
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, newRemovedReplicas, range, _min, i, j, assignment, ns))));
+									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, newRemovedReplicas, range, key, min, i, j, assignment, ns))));
 							}
 						}
 					}
+
+                    prev = *it;
+                    it++;
 				}
 
 				for (unsigned i = 0; i < migrateThreads.size(); i++) {
@@ -1496,7 +1592,7 @@ namespace mongo {
 				}
 			}
 
-			void singleMigrate(string removedreplicas[], BSONObj range, int _min, int i, int j, int assignment[], const string ns)
+			void singleMigrate(string removedreplicas[], BSONObj range, const char *key, BSONObj min, int i, int j, int assignment[], const string ns)
 			{
 				BSONObj res;
 
@@ -1514,6 +1610,10 @@ namespace mongo {
 				cout << "[MYCODE] Chunk " << i << " moving data from shard " << j << " to " << assignment[i] << endl;
 				cout << "[MYCODE] Source Count: " << sourceCount << " Dest Count: " << dstCount << endl;
 
+                BSONObjBuilder b;
+                b.appendAs(min[key], "min");
+                BSONObj minID = b.done();
+
 				toconn->get()->runCommand( "admin" , 
 					BSON( 	"moveData" << ns << 
       						"from" << removedreplicas[j] << 
@@ -1521,7 +1621,7 @@ namespace mongo {
       						/////////////////////////////// 
       						"range" << range << 
       						"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
-      						"shardId" << Chunk::genID(ns, BSON("min" << _min)) << 
+      						"shardId" << Chunk::genID(ns, minID) << 
       						"configdb" << configServer.modelServer() << 
       						"secondaryThrottle" << true 
       					) ,
@@ -1547,37 +1647,16 @@ namespace mongo {
 				fromconn->done();
 			}
 
-			void replicaStop(const string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime startTS[], bool collectTS)
+			void replicaStop(const string ns, int numShards, string removedReplicas[], string primary[], OpTime startTS[], bool collectTS)
 			{
 				// Code for bringing down replica
-                vector<Shard> newShards;
-                Shard primaryShard = grid.getDBConfig(ns)->getPrimary();
-                primaryShard.getAllShards( newShards );
-                int numShards = newShards.size();
-				for (int i = 0; i < numShards; i++)
-					cout << "[MYCODE] Shard Info: " << newShards[i].toString() << endl;
-
-				/*string newRemovedReplicas[numShards];
-
-				for (int i = 0; i < numShards; i++)
-				{
-					for (int j = 0; j < numShards; j++)
-					{
-						if (!newShards[i].getName().compare(shards[j].getName()))
-						{
-							newRemovedReplicas[i] = removedReplicas[j];
-						}
-					}
-				}*/
-
 				BSONObj info;
 				for (int i = 0; i < numShards; i++)
 				{
-					printf("[MYCODE] MYCUSTOMPRINT: %s\n", newShards[i].getConnString().c_str());
+					printf("[MYCODE] MYCUSTOMPRINT: %s going to remove %s\n", primary[i].c_str(), removedReplicas[i].c_str());
                 	scoped_ptr<ScopedDbConnection> conn(
                 		ScopedDbConnection::getScopedDbConnection(
 							primary[i] ) );
-                        	//newShards[i].getConnString() ) );
 
 					if (collectTS)
 					{
@@ -1600,28 +1679,10 @@ namespace mongo {
 				}
 			}
 
-			void replicaReturn(const string ns, vector<Shard> shards, string removedReplicas[], string primary[], map<string, int> hostIDMap, bool configUpdate)
+			void replicaReturn(const string ns, int numShards, string removedReplicas[], string primary[], map<string, int> hostIDMap, bool makePrimary)
 			{
 				// Code for adding back replica
-                vector<Shard> newShards;
-                Shard primaryShard = grid.getDBConfig(ns)->getPrimary();
-                primaryShard.getAllShards( newShards );
-                int numShards = newShards.size();
-				for (int i = 0; i < numShards; i++)
-					cout << "[MYCODE] Shard Info: " << newShards[i].toString() << endl;
-
 				cout << "[MYCODE] hostIDMap size:" << hostIDMap.size() << endl;
-				/*string newRemovedReplicas[numShards];
-				for (int i = 0; i < numShards; i++)
-				{
-					for (int j = 0; j < numShards; j++)
-					{
-						if (!newShards[i].getName().compare(shards[j].getName()))
-						{
-							newRemovedReplicas[i] = removedReplicas[j];
-						}
-					}
-				}*/
 
 				BSONObj info;
 				int hostID = -1;
@@ -1631,12 +1692,10 @@ namespace mongo {
                 	scoped_ptr<ScopedDbConnection> conn(
                 		ScopedDbConnection::getScopedDbConnection(
                         	primary[i] ) );
-                        	//newShards[i].getConnString() ) );
 
 					hostID = -1;
 					for (map<string, int>::iterator it = hostIDMap.begin(); it != hostIDMap.end(); it++)
 					{
-						//cout << "[MYCODE] removedReplicas: " << removedReplicas[i] << " hostIDMap: " << it->first << endl;
 						if (!removedReplicas[i].compare(it->first))
 						{
 							hostID = it->second;
@@ -1649,7 +1708,7 @@ namespace mongo {
 
 					try
 					{
-						conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplicas[i] << "primary" << configUpdate << "id" << hostID), info);
+						conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplicas[i] << "primary" << makePrimary << "id" << hostID), info);
 						string errmsg = conn->get()->getLastError();
 						cout << "[MYCODE] Replica Return:" << errmsg << endl;
 					}
@@ -1661,10 +1720,10 @@ namespace mongo {
 				}
 			}
 
-			void updateConfig(string ns, BSONObj proposedKey, int key2_card, int numChunk, int assignment[])
+			void updateConfig(string ns, BSONObj proposedKey, int key2_card, BSONObjSet splitPoints, int numChunk, int assignment[])
 			{
            		DistributedLock lockSetup( ConnectionString( configServer.getPrimary().getConnString() , ConnectionString::SYNC ) , ns ); 
-           		dist_lock_try dlk; 
+           		dist_lock_try dlk;
 				string errmsg;
 
            		try{ 
@@ -1722,8 +1781,6 @@ namespace mongo {
 					cout << "[MYCODE] All the chunk metadata could not be removed " << e.what() << endl;
 				}
 
-				//maxVersion.incEpoch();
-				//cout << "[MYCODE] MAXVERSION: " << maxVersion.toString() << endl;
 				maxVersion.incMinor();
 				cout << "[MYCODE] MAXVERSION: " << maxVersion.toString() << endl;
 				ChunkManager* cm = new ChunkManager( ns, proposedKey, true );

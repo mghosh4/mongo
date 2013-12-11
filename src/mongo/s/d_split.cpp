@@ -214,6 +214,7 @@ namespace mongo {
             //     a good approximation of the size of the chunk -- without needing to access the actual data.
             //
 
+            cout << "[MYCODE] SplitVector Checkpoint 1\n";
             const char* ns = jsobj.getStringField( "splitVector" );
             BSONObj keyPattern = jsobj.getObjectField( "keyPattern" );
 
@@ -245,6 +246,7 @@ namespace mongo {
             vector<BSONObj> splitKeys;
 
             {
+                cout << "[MYCODE] SplitVector Checkpoint 2\n";
                 // Get the size estimate for this namespace
                 Client::ReadContext ctx( ns );
                 NamespaceDetails *d = nsdetails( ns );
@@ -313,7 +315,9 @@ namespace mongo {
                 
                 
                 // If there's not enough data for more than one chunk, no point continuing.
-                if ( dataSize < maxChunkSize || recCount == 0 ) {
+                cout << "[MYCODE] SplitVector Checkpoint 3\t recCount:" << recCount << "\tdataSize:" << dataSize << "\tmaxChunkSize:" << maxChunkSize << endl;
+                BSONElement reShardElem = jsobj[ "reShard" ];
+                if ( (!reShardElem.ok() &&  dataSize < maxChunkSize) || recCount == 0 ) {
                     vector<BSONObj> emptyVector;
                     result.append( "splitKeys" , emptyVector );
                     return true;
@@ -325,11 +329,12 @@ namespace mongo {
                 // each chunk should have. We'll split at half the maxChunkSize or maxChunkObjects, if
                 // provided.
                 const long long avgRecSize = dataSize / recCount;
-                long long keyCount = maxChunkSize / (2 * avgRecSize);
+                long long keyCount = maxChunkSize / (avgRecSize);
                 if ( maxChunkObjects && ( maxChunkObjects < keyCount ) ) {
                     log() << "limiting split vector to " << maxChunkObjects << " (from " << keyCount << ") objects " << endl;
                     keyCount = maxChunkObjects;
                 }
+                cout << "[MYCODE] Avg Record Size:" << avgRecSize << "\tKey Count:" << keyCount << endl;
                 
                 //
                 // 2. Traverse the index and add the keyCount-th key to the result vector. If that key
@@ -341,6 +346,7 @@ namespace mongo {
                 long long currCount = 0;
                 long long numChunks = 0;
                 
+                cout << "[MYCODE] SplitVector Checkpoint 4\n";
                 BtreeCursor * bc = BtreeCursor::make( d, *idx, min, max, false, 1 );
                 shared_ptr<Cursor> c( bc );
                 auto_ptr<ClientCursor> cc( new ClientCursor( QueryOption_NoCursorTimeout , c , ns ) );
@@ -370,7 +376,7 @@ namespace mongo {
                                 currCount = 0;
                                 numChunks++;
                                 
-                                LOG(4) << "picked a split key: " << currKey << endl;
+                                log() << "picked a split key: " << currKey << endl;
                             }
                             
                         }
@@ -395,6 +401,8 @@ namespace mongo {
                             break;
                         }
                     }
+
+                    cout << "[MYCODE] SplitVector finished" << endl;
                     
                     if ( splitKeys.size() > 1 || ! force )
                         break;
@@ -414,6 +422,7 @@ namespace mongo {
                 //    index
                 //
                 
+                cout << "[MYCODE] SplitVector Checkpoint 5\n";
                 // Warn for keys that are more numerous than maxChunkSize allows.
                 for ( set<BSONObj>::const_iterator it = tooFrequentKeys.begin(); it != tooFrequentKeys.end(); ++it ) {
                     warning() << "chunk is larger than " << maxChunkSize
