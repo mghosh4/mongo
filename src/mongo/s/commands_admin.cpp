@@ -973,16 +973,39 @@ namespace mongo {
 		        conn->done();
 
                 // 1. Calculate the splits for the new shard key
+		        scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
+                        configServer.getPrimary().getConnString() ) );
                 cout << "[MYCODE] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\n";
-                BSONObjSet splitPoints;
+                BSONObjSet splitPoints; 
                 int numChunk = manager->numChunks();
-                pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize/2, numChunk - 1, 0);
+
+                vector<Shard> shards;
+                Shard primary = grid.getDBConfig(ns)->getPrimary();
+                primary.getAllShards( shards );
+                int numShards = shards.size();
+                long long rowCount = 0;
+				for (int i = 0; i < numShards; i++)
+                {
+					cout << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
+                    scoped_ptr<ScopedDbConnection> shardconn(
+                    	ScopedDbConnection::getScopedDbConnection(
+                           	shards[i].getConnString() ) );
+
+                    
+                    rowCount += shardconn->get()->count(ns);
+                    shardconn->done();
+                }
+
+                cout << "[MYCODE] rowCount: " << rowCount << endl;
+
+                long long maxObjectPerChunk = rowCount / numChunk;
+                if (maxObjectPerChunk > Chunk::MaxObjectPerChunk)
+                    maxObjectPerChunk = Chunk::MaxObjectPerChunk;
+
+                pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize, numChunk - 1, maxObjectPerChunk);
 
                 for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
                     cout << "[MYCODE] Split Points:" << it->toString() << endl;
-
-		        scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
-                        configServer.getPrimary().getConnString() ) ); 
 
 				//2. Disable the balancer
 				try { 
@@ -998,12 +1021,6 @@ namespace mongo {
 					return false;
 				}
 
-                vector<Shard> shards;
-                Shard primary = grid.getDBConfig(ns)->getPrimary();
-                primary.getAllShards( shards );
-                int numShards = shards.size();
-				for (int i = 0; i < numShards; i++)
-					cout << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
 
 				// 3. create replica sets
                 scoped_ptr<ScopedDbConnection> shardconn(
@@ -1059,7 +1076,7 @@ namespace mongo {
 				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints);
 				if (!success)
 				{
-					conn->done();
+					conn1->done();
 					return false;
 				}
 
@@ -1099,7 +1116,7 @@ namespace mongo {
 					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints);
 					if (!success)
 					{
-                		conn->done();
+                		conn1->done();
 						return false;
 					}
 				}*/
@@ -1117,7 +1134,7 @@ namespace mongo {
 					cout << b4.toString(); 
 				}
 				catch( DBException& e ){ 
-					conn->done();
+					conn1->done();
 					return false; 
 				}
                 conn1->done();
@@ -1463,6 +1480,7 @@ namespace mongo {
                         try
                         {
 						    datainkr[j][i] = conn->get()->count(ns, range, QueryOption_SlaveOk);
+                            cout << "[MYCODE] Error:" << conn->get()->getLastError() << endl;
                         }
                         catch(DBException e)
                         {

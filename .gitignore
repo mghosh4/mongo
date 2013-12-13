@@ -90,6 +90,7 @@ scratch
 /mongooplog
 /mongoperf
 /bsondump
+/readLatencyMeasure
 
 *.tgz
 *.zip
