@@ -1516,9 +1516,33 @@ namespace mongo {
             out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
         }
 
+		struct Writer
+		{
+			Writer(const string localns): ns(localns) {}
+
+			void operator () (const BSONObj &o)
+			{
+				log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+            	PageFaultRetryableSection pgrs;
+	    		while ( 1 ) {
+    	   			try {
+						Lock::DBWrite r(ns);
+						Client::Context context(ns);
+						theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
+        	   			break;
+           			}
+           			catch ( PageFaultException& e ) {
+            			e.touch();
+            		}
+				}
+			}
+
+			const string ns;
+		};
+
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // 1.
-            string ns = cmdObj.firstElement().str();
+            const string ns = cmdObj.firstElement().str();
             string to = cmdObj["to"].str();
             string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
 			log() << "[MYCODE] INSIDE THE CODE" << rsLog;
@@ -1599,9 +1623,13 @@ namespace mongo {
 
 			// Insert all the data within the range in this shard
 
+			Writer writer(ns);
 			scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
+
+			boost::function<void(const BSONObj&)> castedWriter(writer);
+			fromConn->get()->query(castedWriter, ns, range, NULL, QueryOption_SlaveOk | QueryOption_NoCursorTimeout | QueryOption_Exhaust);
 			
-			scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, range, 0, 0, 0, QueryOption_SlaveOk));
+			/*scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, range, 0, 0, 0, QueryOption_SlaveOk));
 
 			int count = 0;
 			try
@@ -1634,20 +1662,23 @@ namespace mongo {
 				return false;
 			}
 
-			log() << "[MYCODE] count: " << count << endl;
+			log() << "[MYCODE] count: " << count << endl;*/
 
 			//Delete all the data from the source shard
-			try
+
+			while (true)
 			{
-				fromConn->get()->remove(ns, range);
-				string errmsg = fromConn->get()->getLastError();
-				log() << "[MYCODE] REMOVEERROR:" << errmsg;
-			}
-			catch (DBException e)
-			{
-				log() << "[MYCODE] Exception thrown during removal" << endl;
-				result.append("removeerror", e.what());
-				return false;
+				try
+				{
+					fromConn->get()->remove(ns, range);
+					string errmsg = fromConn->get()->getLastError();
+					cout << "Remove Error:" << errmsg << endl;
+					break;
+				}
+				catch (DBException e)
+				{
+					continue;
+				}
 			}
 
 			log() << "[MYCODE] Removal Complete" << endl;
