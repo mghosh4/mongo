@@ -1004,6 +1004,7 @@ namespace mongo {
 
                 pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize, numChunk - 1, maxObjectPerChunk);
 
+				numChunk = splitPoints.size() + 1;
                 for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
                     cout << "[MYCODE] Split Points:" << it->toString() << endl;
 
@@ -1085,7 +1086,7 @@ namespace mongo {
 					return false;
 				}
 
-				/*log() << "[MYCODE] Checking Timestamp before starting secondaries" << endl;
+				log() << "[MYCODE] Checking Timestamp before starting secondaries" << endl;
 
 				OpTime newTS[numShards];
 				checkTimestamp(removedReplicas, numShards, newTS);
@@ -1124,7 +1125,7 @@ namespace mongo {
                 		conn1->done();
 						return false;
 					}
-				}*/
+				}
 				
 				delete[] replicaSets;
 
@@ -1503,11 +1504,13 @@ namespace mongo {
                         	}
 						}
 
+						//cout << "[MYCODE] j:" << j << " numChunk:" << numChunk << endl;
 						if (j < numChunk - 1)
 						{
                         	prev = *it;
                         	it++;
 						}
+						//cout << "[MYCODE] prev:" << prev.toString() << " *it:" << it->toString() << endl;
                     }
 
                     conn->done();
@@ -1694,19 +1697,27 @@ namespace mongo {
                 b.appendAs(min[key], "min");
                 BSONObj minID = b.done();
 
-				toconn->get()->runCommand( "admin" , 
-					BSON( 	"moveData" << ns << 
-      						"from" << removedreplicas[j] << 
-      						"to" << removedreplicas[assignment[i]] << 
-      						/////////////////////////////// 
-      						"range" << range << 
-      						"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
-      						"shardId" << Chunk::genID(ns, minID) << 
-      						"configdb" << configServer.modelServer() << 
-      						"secondaryThrottle" << true 
-      					) ,
-						res
-				);
+				try
+				{
+					toconn->get()->runCommand( "admin" , 
+						BSON( 	"moveData" << ns <<
+								"key" << key << 
+      							"from" << removedreplicas[j] << 
+      							"to" << removedreplicas[assignment[i]] << 
+      							/////////////////////////////// 
+      							"range" << range << 
+      							"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
+      							"shardId" << Chunk::genID(ns, minID) << 
+      							"configdb" << configServer.modelServer() << 
+      							"secondaryThrottle" << true 
+      						) ,
+							res
+					);
+				}
+				catch (DBException e)
+				{
+					cout << "[MYCODE] Caught exception while moving data:" << e.what() << endl;
+				}
 
 				/*if (res["connerror"].ok())
 					cout << "Error:" << res["connerror"].str() << endl;
@@ -1715,7 +1726,7 @@ namespace mongo {
 				if (res["inserterror"].ok())
 					cout << "Error:" << res["inserterror"].str() << endl;
 				if (res["count"].ok())*/
-				cout << "[MYCODE] Count returned:" << res.toString() << endl;
+				//cout << "[MYCODE] Count returned:" << res.toString() << endl;
 				
 				//sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
 				//dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);

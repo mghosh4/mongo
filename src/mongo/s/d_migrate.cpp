@@ -1516,33 +1516,10 @@ namespace mongo {
             out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
         }
 
-		struct Writer
-		{
-			Writer(const string localns): ns(localns) {}
-
-			void operator () (const BSONObj &o)
-			{
-				log() << "[MYCODE] DATA: " << o.toString() << rsLog;
-            	PageFaultRetryableSection pgrs;
-	    		while ( 1 ) {
-    	   			try {
-						Lock::DBWrite r(ns);
-						Client::Context context(ns);
-						theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
-        	   			break;
-           			}
-           			catch ( PageFaultException& e ) {
-            			e.touch();
-            		}
-				}
-			}
-
-			const string ns;
-		};
-
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // 1.
             const string ns = cmdObj.firstElement().str();
+			const string key = cmdObj["key"].str();
             string to = cmdObj["to"].str();
             string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
 			log() << "[MYCODE] INSIDE THE CODE" << rsLog;
@@ -1623,46 +1600,55 @@ namespace mongo {
 
 			// Insert all the data within the range in this shard
 
-			Writer writer(ns);
 			scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
 
-			boost::function<void(const BSONObj&)> castedWriter(writer);
-			fromConn->get()->query(castedWriter, ns, range, NULL, QueryOption_SlaveOk | QueryOption_NoCursorTimeout | QueryOption_Exhaust);
-			
-			/*scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, range, 0, 0, 0, QueryOption_SlaveOk));
-
+			BSONObj o;
+			BSONObj qRange = range.getOwned();
 			int count = 0;
-			try
+			while(1)
 			{
-				while (cursor->more()) {
-					count++;
-					BSONObj o = cursor->next().getOwned();
-					log() << "[MYCODE] DATA: " << o.toString() << rsLog;
-        			{
-            			PageFaultRetryableSection pgrs;
-	            		while ( 1 ) {
-    	            		try {
-								Lock::DBWrite r(ns);
-								Client::Context context(ns);
-								theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
-                    			break;
-                			}
-                			catch ( PageFaultException& e ) {
-                    			e.touch();
-                			}
-            			}
-        			}	
+				log() << "Query Range:" << qRange.toString() << endl;
+				scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
+
+				try
+				{
+					while (cursor->more()) {
+						count++;
+						o = cursor->next().getOwned();
+						log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+        				{
+            				PageFaultRetryableSection pgrs;
+	        	    		while ( 1 ) {
+    	    	        		try {
+									Lock::DBWrite r(ns);
+									Client::Context context(ns);
+									theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
+            	        			break;
+            	    			}
+            	    			catch ( PageFaultException& e ) {
+            	        			e.touch();
+            	    			}
+            				}
+        				}
+					}
+					break;
+				}
+				catch (DBException e)
+				{
+					log() << "Last BSONObj before crash:" << o.toString() << endl;
+
+					BSONObjBuilder b;
+					BSONObjBuilder sub(b.subobjStart(key));
+					sub.appendAs(o[key], "$gt");
+					BSONObj rangeVal = qRange[key].Obj();
+					if (!rangeVal["$lt"].eoo())
+						sub.append(rangeVal["$lt"]);
+					BSONObj subObj = sub.done();
+					qRange = b.done().getOwned();
 				}
 			}
-			catch (DBException e)
-			{
-				result.append("count", count);
-				result.append("inserterror", e.what());
-				log() << "[MYCODE] Move Data Error:" << e.what();
-				return false;
-			}
 
-			log() << "[MYCODE] count: " << count << endl;*/
+			log() << "[MYCODE] count: " << count << endl;
 
 			//Delete all the data from the source shard
 
@@ -1672,7 +1658,7 @@ namespace mongo {
 				{
 					fromConn->get()->remove(ns, range);
 					string errmsg = fromConn->get()->getLastError();
-					cout << "Remove Error:" << errmsg << endl;
+					log() << "Remove Error:" << errmsg << endl;
 					break;
 				}
 				catch (DBException e)
@@ -1686,6 +1672,7 @@ namespace mongo {
 
 			return true;
 		}
+
 	}moveDataCmd;
 
     bool ShardingState::inCriticalMigrateSection() {
