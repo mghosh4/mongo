@@ -1524,12 +1524,9 @@ namespace mongo {
             string to = cmdObj["to"].str();
             string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
 			log() << "[MYCODE] INSIDE THE CODE" << rsLog;
+			result.append("count", 1);
 
-            while(!theReplSet->state().shunned())
-            {
-                log() << "[MYCODE] Sleeping for 10 secs till member state changes to SHUNNED" << endl;
-                sleepsecs(10);
-            }
+            log() << "[MYCODE] Member State:" << theReplSet->state() << endl;
 
             // if we do a w=2 after every write
             bool secondaryThrottle = cmdObj["secondaryThrottle"].trueValue();
@@ -1606,7 +1603,9 @@ namespace mongo {
 
 			// Insert all the data within the range in this shard
 
-			scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
+            scoped_ptr<DBClientConnection> fromConn(new DBClientConnection(true, 0, 60 * 10));
+
+            while (!fromConn->connect(from, errmsg));
 
 			BSONObj o;
 			BSONObj qRange = range.getOwned();
@@ -1614,7 +1613,13 @@ namespace mongo {
 			while(1)
 			{
 				log() << "Query Range:" << qRange.toString() << endl;
-				scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
+				scoped_ptr<DBClientCursor> cursor(fromConn->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
+
+                if (!cursor)
+                {
+                    log() << "[MYCODE] Cursor creation failed" << endl;
+                    continue;
+                }
 
 				try
 				{
@@ -1662,7 +1667,9 @@ namespace mongo {
 			{
 				try
 				{
-					fromConn->get()->remove(ns, range);
+					fromConn->remove(ns, range);
+					//errmsg = fromConn->get()->getLastError();
+					//log() << "Remove Error:" << errmsg << endl;
 					break;
 				}
 				catch (DBException e)
@@ -1672,7 +1679,32 @@ namespace mongo {
 			}
 
 			log() << "[MYCODE] Removal Complete" << endl;
-			fromConn->done();
+
+            /*while (true)
+            {
+                try
+                {
+                    unsigned long long fCount = fromConn->count(ns, range);
+                    log() << "From Count:" << fCount << endl;
+                }
+                catch(DBException e)
+                {
+                    log() << "Caught exception during count" << endl;
+                }
+            }
+
+            DBDirectClient cli;
+            unsigned long long toCount = cli.count(ns, range);
+            log() << "To Count:" << toCount << endl;
+
+            try
+            {
+			    fromConn->done();
+            }
+            catch (DBException e)
+            {
+                log() << "Caught DBException. Have no clue why this happens" << endl;
+            }*/
 
 			return true;
 		}

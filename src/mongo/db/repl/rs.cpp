@@ -552,7 +552,7 @@ namespace mongo {
                 endOldHealthTasks();
 
                 // close sockets to force clients to re-evaluate this member
-                MessagingPort::closeAllSockets(0);
+                // MessagingPort::closeAllSockets(0);
 
                 // take note of our ejection
                 changeState(MemberState::RS_SHUNNED);

@@ -1463,11 +1463,41 @@ namespace mongo {
 			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
 			{
 				printf("[MYCODE] RUNALGORITHM\n");
-				long long datainkr[numChunk][numShards];
+				long long **datainkr;
+                datainkr = new long long*[numChunk];
+				for (int i = 0; i < numChunk; i++)
+                    datainkr[i] = new long long[numShards];
+
 				for (int i = 0; i < numChunk; i++)
 					for (int j = 0; j < numShards; j++)
 						datainkr[i][j] = 0;
 
+                collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
+
+				for (int i = 0; i < numChunk; i++)
+				{
+					int max = 0, shard_num = 0;
+					for (int j = 0; j < numShards; j++)
+					{
+						if (max < datainkr[i][j])
+						{
+							max = datainkr[i][j];
+							shard_num = j;
+						}
+					}
+					assignment[i] = shard_num;
+				}
+
+				cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
+				for (int i = 0; i < numChunk; i++)
+					cout << assignment[i] << "\t";
+				cout << "\n";
+
+                delete[] datainkr;
+			}
+
+            void collectData(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, long long **datainkr)
+            {
 			    const char *key = proposedKey.firstElement().fieldName();
                 BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
                 BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
@@ -1524,26 +1554,7 @@ namespace mongo {
 						cout << datainkr[i][j] << "\t";
 					cout << endl;
 				}
-
-				for (int i = 0; i < numChunk; i++)
-				{
-					int max = 0, shard_num = 0;
-					for (int j = 0; j < numShards; j++)
-					{
-						if (max < datainkr[i][j])
-						{
-							max = datainkr[i][j];
-							shard_num = j;
-						}
-					}
-					assignment[i] = shard_num;
-				}
-
-				cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
-				for (int i = 0; i < numChunk; i++)
-					cout << assignment[i] << "\t";
-				cout << "\n";
-			}
+            }
 
             BSONObj getRangeAsBSON(const char* key, BSONObj min, BSONObj max)
             {
@@ -1645,6 +1656,19 @@ namespace mongo {
 				for (unsigned i = 0; i < migrateThreads.size(); i++) {
 					migrateThreads[i]->join();
 				}
+
+				long long **datainkr;
+                datainkr = new long long*[numChunk];
+				for (int i = 0; i < numChunk; i++)
+                    datainkr[i] = new long long[numShards];
+
+				for (int i = 0; i < numChunk; i++)
+					for (int j = 0; j < numShards; j++)
+						datainkr[i][j] = 0;
+
+                collectData(splitPoints, ns, newRemovedReplicas, numChunk, numShards, proposedKey, datainkr);
+
+                delete[] datainkr;
 			}
 
 			void singleMigrate(string removedreplicas[], BSONObj range, const char *key, BSONObj min, int i, int j, int assignment[], const string ns)
@@ -1659,10 +1683,8 @@ namespace mongo {
                		ScopedDbConnection::getScopedDbConnection(
                      	removedreplicas[j] ) );
 
-				//long long sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
-				//long long dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
-
-				long long sourceCount, dstCount;
+				long long sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
+				long long dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
 
 				while (true)
 				{
@@ -1731,7 +1753,7 @@ namespace mongo {
 				//sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
 				//dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
 
-				while (true)
+				/*while (true)
 				{
 					try
 					{
@@ -1758,7 +1780,7 @@ namespace mongo {
 				}
 
 				cout << "[MYCODE] After Transfer" << endl;
-				cout << "[MYCODE] Source Count:" << sourceCount << " Dest Count:" << dstCount << endl;
+				cout << "[MYCODE] Source Count:" << sourceCount << " Dest Count:" << dstCount << endl;*/
 
 				toconn->done();
 				fromconn->done();
