@@ -194,6 +194,7 @@ namespace {
         clusterAdminRoleWriteActions.addAction(ActionType::replSetReconfig);
         clusterAdminRoleWriteActions.addAction(ActionType::replSetRemove);
         clusterAdminRoleWriteActions.addAction(ActionType::replSetAdd);
+        clusterAdminRoleWriteActions.addAction(ActionType::replayOplog);
         clusterAdminRoleWriteActions.addAction(ActionType::replSetLeader);
         clusterAdminRoleWriteActions.addAction(ActionType::replGetIdentifier);
         clusterAdminRoleWriteActions.addAction(ActionType::resync);

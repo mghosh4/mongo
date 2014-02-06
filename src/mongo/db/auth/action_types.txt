@@ -76,6 +76,7 @@
 "replGetIdentifier",
 "replSetStepDown",
 "replSetSyncFrom",
+"replayOplog",
 "resync",
 "serverStatus",
 "setParameter",

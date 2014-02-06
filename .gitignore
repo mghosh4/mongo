@@ -39,6 +39,8 @@
 *.psess
 *#
 .#*
+*.sublime-project
+*.sublime-workspace
 
 /src/mongo/*/*Debug*/
 /src/mongo/*/*/*Debug*/
