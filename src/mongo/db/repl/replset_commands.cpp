@@ -648,6 +648,105 @@ namespace mongo {
             cout<<"[MYCODE_HOLLA] ";
         }
 
+        void printExtractedArgs(string& ns, OpTime& startTime, string& primary, BSONObj& proposedKey, int& numChunks,
+                                    vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
+            printLogID();
+            cout<<"Namespace is: "<<ns<<endl;
+            printLogID();
+            cout<<"Start time is: "<<startTime.toString()<<endl;
+            printLogID();
+            cout<<"Primary is: "<<primary<<endl;
+            printLogID();
+            cout<<"Proposed key: "<<proposedKey.toString()<<endl;
+            printLogID();
+            cout<<"Num chunks: "<<numChunks<<endl;
+            printLogID();
+            cout<<"Split points: ";
+            for(int i = 0; i < splitPoints.size(); i++) {
+                cout<<splitPoints[i].toString()<<" | ";
+            }
+            cout<<endl;
+            printLogID();
+            cout<<"Assignments: ";
+            for(int i = 0; i < assignments.size(); i++) {
+                cout<<assignments[i]<<" | ";
+            }
+            cout<<endl;
+            printLogID();
+            cout<<"Removed replicas: ";
+            for(int i = 0; i < removedReplicas.size(); i++) {
+                cout<<removedReplicas[i]<<" | ";
+            }
+            cout<<endl;
+        }
+        bool checkAndExtractArgs(BSONObj oplogParams, string& errmsg,
+                                    string& ns,
+                                    OpTime& startTime,
+                                    string& primary,
+                                    BSONObj& proposedKey,
+                                    int& numChunks,
+                                    vector<BSONObj>& splitPoints,
+                                    vector<int>& assignments,
+                                    vector<string>& removedReplicas
+                                    ) {
+            //namespace
+            ns = oplogParams["ns"].String();
+            if ( ns.size() == 0 ) {
+                errmsg = "no ns";
+                return false;
+            } else {
+                const NamespaceString nsStr( ns );
+                if ( !nsStr.isValid() ){
+                    errmsg = str::stream() << "bad ns[" << ns << "]";
+                    return false;
+                }
+            }
+
+            //start time
+            startTime = oplogParams["startTime"]._opTime();
+            if (startTime.isNull()) {
+                errmsg = "no start time";
+                return false;
+            }
+
+            //primary
+            primary = oplogParams["primary"].String();
+            if ( primary.size() == 0 ) {
+                errmsg = "no primary provided";
+                return false;
+            }
+
+            //proposed key
+            proposedKey = oplogParams["proposedKey"].Obj();
+            if ( proposedKey.isEmpty() ) {
+                errmsg = "no shard key";
+                return false;
+            }
+
+            //number of chunks
+            numChunks = oplogParams["numChunks"].Int();
+
+            //split points
+            vector<BSONElement> splitPointsRaw = oplogParams["splitPoints"].Array();
+            for (vector<BSONElement>::iterator point = splitPointsRaw.begin(); point != splitPointsRaw.end(); point++) {
+                splitPoints.push_back((*point).Obj());
+            }
+
+            //assignments
+            vector<BSONElement> assignmentsRaw = oplogParams["assignments"].Array();
+            for (vector<BSONElement>::iterator assignment = assignmentsRaw.begin(); assignment != assignmentsRaw.end(); assignment++){
+               assignments.push_back((*assignment).Int());
+            }
+
+            //removed replicas
+            vector<BSONElement> removedReplicasRaw = oplogParams["removedReplicas"].Array();
+            for (vector<BSONElement>::iterator removedReplica = removedReplicasRaw.begin(); removedReplica != removedReplicasRaw.end(); removedReplica++){
+               removedReplicas.push_back((*removedReplica).String());
+            }
+
+            return true;
+        }
+
         virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
             //check if there is already an error message, if there is return immediately
             //TODO GOPAL: See how to recognize this failure at the other end
@@ -659,91 +758,30 @@ namespace mongo {
             printLogID();
             cout<<"Command object is - " << cmdObj.toString() <<endl;
 
-            //extract the parameters
+            //extract the arguments package
             BSONObj oplogParams = cmdObj["replayOplog"].Obj().getOwned();
             printLogID();
             cout<<"oplogParams are " << oplogParams.toString() << endl; 
 
-            //do some checks to see we have all the info we require
+            //declare the arguments we want
+            string ns;                                           //namespace
+            OpTime startTime;                                   //time from which oplog needs to be replayed        
+            string primary;                               //the primary to connect to (for oplog details)
+            BSONObj proposedKey;                                //the proposed key
+            int numChunks;                                      //number of chunks
+            vector<BSONObj> splitPoints;                        //split points
+            vector<int> assignments;                            //the new assignments for chunks
+            vector<string> removedReplicas;                     //the other removed replicas                            
             
-            //namespace
-            printLogID();
-            cout<<"Doing namespace check .... ";
-            const string ns = oplogParams["ns"].String();
-            if ( ns.size() == 0 ) {
-                errmsg = "no ns";
-                return false;
-            } else {
-                const NamespaceString nsStr( ns );
-                if ( !nsStr.isValid() ){
-                    errmsg = str::stream() << "bad ns[" << ns << "]";
-                    return false;
-                }
-            }
-            cout<<"Namespace is: "<<ns<<endl;
-
-            //start time
-            printLogID();
-            cout<<"Doing start time check .... ";
-            OpTime startTime = oplogParams["startTime"]._opTime();
-            if (startTime.isNull()) {
-                errmsg = "no start time";
+            //do some checks to see we have all the info we require
+            //also extract the arguments in the same call
+            if( !checkAndExtractArgs(oplogParams, errmsg,
+                                        ns, startTime, primary, proposedKey, numChunks,
+                                        splitPoints, assignments,removedReplicas)) {
                 return false;
             }
-            cout<<"Start time is: "<<startTime.toString()<<endl;
 
-            //proposed key
-            printLogID();
-            cout<<"Doing proposed key check .... ";
-            BSONObj proposedKey = oplogParams["proposedKey"].Obj();
-            if ( proposedKey.isEmpty() ) {
-                errmsg = "no shard key";
-                return false;
-            }
-            cout<<"Proposed key: "<<proposedKey.toString()<<endl;
-
-            //split points
-            vector<BSONElement> splitPointsRaw = oplogParams["splitPoints"].Array();
-            vector<BSONObj> splitPoints;
-            printLogID();
-            cout<<"Split points: ";
-            for (vector<BSONElement>::iterator point = splitPointsRaw.begin(); point != splitPointsRaw.end(); point++)
-            {
-                splitPoints.push_back((*point).Obj());
-                cout<<(*point).Obj().toString()<<" | ";
-            }
-            cout<<endl;
-
-            //number of chunks
-            printLogID();
-            cout<<"Doing Num chunks check .... ";
-            int numChunks = oplogParams["numChunks"].Int();
-            cout<<"Num chunks: "<<numChunks<<endl;
-
-            //assignments
-            vector<BSONElement> assignmentsRaw = oplogParams["assignments"].Array();
-            vector<int> assignments;
-            printLogID();
-            cout<<"Assignments: ";
-            for (vector<BSONElement>::iterator assignment = assignmentsRaw.begin(); assignment != assignmentsRaw.end(); assignment++)
-            {
-               assignments.push_back((*assignment).Int());
-               cout<<(*assignment).Int()<<" | ";
-            }
-            cout<<endl;
-
-            //removed replicas
-            vector<BSONElement> removedReplicasRaw = oplogParams["removedReplicas"].Array();
-            vector<string> removedReplicas;
-            printLogID();
-            cout<<"Removed replicas: ";
-            for (vector<BSONElement>::iterator removedReplica = removedReplicasRaw.begin(); removedReplica != removedReplicasRaw.end(); removedReplica++)
-            {
-               removedReplicas.push_back((*removedReplica).String());
-               cout<<(*removedReplica).String()<<" | ";
-            }
-            cout<<endl;
-
+            printExtractedArgs(ns, startTime, primary, proposedKey, numChunks, splitPoints, assignments,removedReplicas);
             return true;
         }
     } cmdReplayOplog;
