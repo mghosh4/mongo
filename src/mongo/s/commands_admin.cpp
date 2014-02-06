@@ -1825,8 +1825,8 @@ namespace mongo {
                     params.append("startTime", startTS[i]);                             //time from which oplog needs to be replayed                         
                     params.append("primary", primary[i]);                               //the primary to connect to (for oplog details)
                     params.append("proposedKey", proposedKey);                          //the proposed key
-                    params.append("splitPoints", points);                               //split points
                     params.append("numChunks", numChunks);                              //number of chunks
+                    params.append("splitPoints", points);                               //split points
                     params.append("assignments", assignmentsVector);                    //the new assignments for chunks
                     params.append("removedReplicas", removedReplicasVector);            //the other removed replicas
 
