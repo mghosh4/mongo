@@ -1070,13 +1070,20 @@ namespace mongo {
 					primaryReplicas[i] = replicaSets[numHosts - 1][i];
 
 				OpTime currTS[numShards];
-				log() << "[MYCODE] Stopping first set of hosts" << endl;
+				log() << "[MYCODE] Stopping first set of hosts" << endl;                
 				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
 
 				// 3. Run the algorithm
 				log() << "[MYCODE] Running the algorithm" << endl;
 				int assignment[numChunk];
 				runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
+
+                testReplay(ns, proposedKey, splitPoints, 
+                                numShards, primaryReplicas, removedReplicas, currTS, 
+                                numChunk, assignment, 
+                                errmsg);
+                //TODO GOPAL: Remove this
+                return true;
 
 				log() << "[MYCODE] Reconfiguring first set of hosts" << endl;
 				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment);
@@ -1786,6 +1793,76 @@ namespace mongo {
 				fromconn->done();
 			}
 
+            bool testReplay(const string ns, BSONObj proposedKey, BSONObjSet splitPoints,  
+                                int numShards, string primary[], string removedReplicas[], OpTime startTS[],
+                                int numChunks,  int assignments[], 
+                                string& errmsg) {
+                cout<<"[MYCODE_HOLLA] ==== In test replay ==== "<<endl;
+
+                //command return info
+                BSONObj info;
+
+                //conversion from arrays to vectors for bundling into bson
+                vector<string> removedReplicasVector(removedReplicas, removedReplicas + numShards);
+                vector<int> assignmentsVector(assignments, assignments + numChunks);
+
+                //conversion from BSONObjSet to BSONObj for bundling into bson
+                vector<BSONObj> points;
+                for(BSONObjSet::iterator point = splitPoints.begin(); point != splitPoints.end(); point++) {
+                    points.push_back(*point);
+                }
+
+                //iterate over each removed replica and ask mongod to attempt replay of oplog
+                for (int i = 0; i < numShards; i++) {
+                    //make a connection to the required replica
+                    scoped_ptr<ScopedDbConnection> conn(
+                            ScopedDbConnection::getScopedDbConnection(
+                                removedReplicas[i] ) );
+
+                    //bundle the params
+                    BSONObjBuilder params;
+                    params.append("ns", ns);                                            //namespace
+                    params.append("startTime", startTS[i]);                             //time from which oplog needs to be replayed                         
+                    params.append("primary", primary[i]);                               //the primary to connect to (for oplog details)
+                    params.append("proposedKey", proposedKey);                          //the proposed key
+                    params.append("splitPoints", points);                               //split points
+                    params.append("numChunks", numChunks);                              //number of chunks
+                    params.append("assignments", assignmentsVector);                    //the new assignments for chunks
+                    params.append("removedReplicas", removedReplicasVector);            //the other removed replicas
+
+                    //create an object to encapsulate all the params
+                    BSONObj oplogParams = params.obj();                 
+                    cout<<"[MYCODE_HOLLA] Oplog params are "<< oplogParams.toString()<<endl;
+
+                    //attempt to tell mongod to run the command
+                    try {
+                        //make the connection and issue the command
+                        cout<<"[MYCODE_HOLLA] Making a connection to "<< removedReplicas[i]<<endl;
+                        if( !conn->get()->runCommand("admin", BSON("replayOplog" << oplogParams), info)) {
+                            cout<<"[MYCODE_HOLLA] Command failed"<<endl;
+                            string errmsg = conn->get()->getLastError();
+                            cout<<"[MYCODE_HOLLA] ErrMsg: "<<errmsg<<endl;
+                            //TODO GOPAL: Fill errmsg
+                            //TODO GOPAL: What do you do if this happens? Retry/Fail?
+                        } else {
+                            //TODO GOPAL: Do we want anything from info?
+                            cout<<"[MYCODE_HOLLA] Info has: "<<info.toString()<<endl;
+                        }
+                    }
+                    catch(DBException e){
+                        //oops something went wrong
+                        //TODO GOPAL: What do you do if this happens? Retry/Fail?
+                        cout << "[MYCODE_HOLLA] replayOplog" << " threw exception: " << e.toString() << endl;
+                    }
+                    //close the connection
+                    conn->done();
+                }
+
+                //all good
+                return true;
+
+            }
+
 			void replicaStop(const string ns, int numShards, string removedReplicas[], string primary[], OpTime startTS[], bool collectTS)
 			{
 				// Code for bringing down replica
@@ -1806,13 +1883,14 @@ namespace mongo {
 						oplogReader.resetConnection();
 					}
 
-					try
+                    //TODO GOPAL: Uncomment this
+					/*try
 					{
 						conn->get()->runCommand("admin", BSON("replSetRemove" << removedReplicas[i]), info);
 					}
 					catch(DBException e){
 						cout << "[MYCODE] stepping down" << " threw exception: " << e.toString() << endl;
-					}
+					}*/
 
 					conn->done();
 				}

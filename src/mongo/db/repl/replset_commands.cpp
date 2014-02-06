@@ -628,6 +628,126 @@ namespace mongo {
         }
     } cmdReplSetAdd;
 
+
+    class CmdReplayOplog : public ReplSetCommand {
+    public:
+        virtual void help( stringstream &help ) const {
+            help << "{ {replayOplog : <oplogParams>} }";
+            help << "replay the oplog\n";
+            help << "\nhttp://dochub.mongodb.org/core/replicasetcommands";
+        }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::replayOplog);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        CmdReplayOplog() : ReplSetCommand("replayOplog") { }
+        void printLogID() {
+            cout<<"[MYCODE_HOLLA] ";
+        }
+
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
+            //check if there is already an error message, if there is return immediately
+            //TODO GOPAL: See how to recognize this failure at the other end
+            if( !check(errmsg, result) )
+                return false;
+
+            printLogID();
+            cout<<"Caught a replay oplog command"<<endl;
+            printLogID();
+            cout<<"Command object is - " << cmdObj.toString() <<endl;
+
+            //extract the parameters
+            BSONObj oplogParams = cmdObj["replayOplog"].Obj().getOwned();
+            printLogID();
+            cout<<"oplogParams are " << oplogParams.toString() << endl; 
+
+            //do some checks to see we have all the info we require
+            
+            //namespace
+            printLogID();
+            cout<<"Doing namespace check .... ";
+            const string ns = oplogParams["ns"].String();
+            if ( ns.size() == 0 ) {
+                errmsg = "no ns";
+                return false;
+            } else {
+                const NamespaceString nsStr( ns );
+                if ( !nsStr.isValid() ){
+                    errmsg = str::stream() << "bad ns[" << ns << "]";
+                    return false;
+                }
+            }
+            cout<<"Namespace is: "<<ns<<endl;
+
+            //start time
+            printLogID();
+            cout<<"Doing start time check .... ";
+            OpTime startTime = oplogParams["startTime"]._opTime();
+            if (startTime.isNull()) {
+                errmsg = "no start time";
+                return false;
+            }
+            cout<<"Start time is: "<<startTime.toString()<<endl;
+
+            //proposed key
+            printLogID();
+            cout<<"Doing proposed key check .... ";
+            BSONObj proposedKey = oplogParams["proposedKey"].Obj();
+            if ( proposedKey.isEmpty() ) {
+                errmsg = "no shard key";
+                return false;
+            }
+            cout<<"Proposed key: "<<proposedKey.toString()<<endl;
+
+            //split points
+            vector<BSONElement> splitPointsRaw = oplogParams["splitPoints"].Array();
+            vector<BSONObj> splitPoints;
+            printLogID();
+            cout<<"Split points: ";
+            for (vector<BSONElement>::iterator point = splitPointsRaw.begin(); point != splitPointsRaw.end(); point++)
+            {
+                splitPoints.push_back((*point).Obj());
+                cout<<(*point).Obj().toString()<<" | ";
+            }
+            cout<<endl;
+
+            //number of chunks
+            printLogID();
+            cout<<"Doing Num chunks check .... ";
+            int numChunks = oplogParams["numChunks"].Int();
+            cout<<"Num chunks: "<<numChunks<<endl;
+
+            //assignments
+            vector<BSONElement> assignmentsRaw = oplogParams["assignments"].Array();
+            vector<int> assignments;
+            printLogID();
+            cout<<"Assignments: ";
+            for (vector<BSONElement>::iterator assignment = assignmentsRaw.begin(); assignment != assignmentsRaw.end(); assignment++)
+            {
+               assignments.push_back((*assignment).Int());
+               cout<<(*assignment).Int()<<" | ";
+            }
+            cout<<endl;
+
+            //removed replicas
+            vector<BSONElement> removedReplicasRaw = oplogParams["removedReplicas"].Array();
+            vector<string> removedReplicas;
+            printLogID();
+            cout<<"Removed replicas: ";
+            for (vector<BSONElement>::iterator removedReplica = removedReplicasRaw.begin(); removedReplica != removedReplicasRaw.end(); removedReplica++)
+            {
+               removedReplicas.push_back((*removedReplica).String());
+               cout<<(*removedReplica).String()<<" | ";
+            }
+            cout<<endl;
+
+            return true;
+        }
+    } cmdReplayOplog;
+
     class CmdReplSetStepDown: public ReplSetCommand {
     public:
         virtual void help( stringstream &help ) const {
