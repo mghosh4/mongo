@@ -35,7 +35,7 @@ sh.help = function() {
     print( "\tsh.addShard( host )                       server:port OR setname/server:port" )
     print( "\tsh.enableSharding(dbname)                 enables sharding on the database dbname" )
     print( "\tsh.shardCollection(fullName,key,unique)   shards the collection" );
-    print( "\tsh.reShardCollection(fullName,key,unique) reshards the collection" );
+    print( "\tsh.reShardCollection(fullName,key,unique,loadBalance) reshards the collection" );
 
     print( "\tsh.splitFind(fullName,find)               splits the chunk that find is in at the median" );
     print( "\tsh.splitAt(fullName,middle)               splits the chunk that middle is in at middle" );
@@ -78,7 +78,7 @@ sh.shardCollection = function( fullName , key , unique ) {
     return sh._adminCommand( cmd );
 }
 
-sh.reShardCollection = function( fullName , key , unique ) {
+sh.reShardCollection = function( fullName , key , unique , loadBalance ) {
     sh._checkFullName( fullName )
     assert( key , "need a key" )
     assert( typeof( key ) == "object" , "key needs to be an object" )
@@ -86,6 +86,8 @@ sh.reShardCollection = function( fullName , key , unique ) {
     var cmd = { reShardCollection : fullName , key : key }
     if ( unique ) 
         cmd.unique = true;
+    if ( loadBalance ) 
+        cmd.loadBalance = true;
 
     return sh._adminCommand( cmd );
 }
