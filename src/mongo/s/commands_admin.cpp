@@ -1527,7 +1527,7 @@ namespace mongo {
 				algo->max_cost_assignment(datainkr,numChunk,numShards*chunkpershard,assignment);
 				for (int i = 0; i < numChunk; i++)
 				{
-					assignment[i] = floor(assignment[i]/chunkperserver);
+					assignment[i] = floor(assignment[i]/chunkpershard);
 				}
 
 				cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
