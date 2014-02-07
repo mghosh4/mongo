@@ -1514,7 +1514,7 @@ namespace mongo {
 						datainkr[i][j] = 0;
 
                 collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
-                int chunkpershard = ceil((double)numChunk/numShards);
+                int chunkpershard = (int)ceil((double)numChunk/numShards);
                 long long **newdatainkr = new long long*[numChunk];
                                 for (int i = 0; i < numChunk; i++)
                     newdatainkr[i] = new long long[numShards*chunkpershard];
@@ -1527,7 +1527,7 @@ namespace mongo {
 				algo->max_cost_assignment(datainkr,numChunk,numShards*chunkpershard,assignment);
 				for (int i = 0; i < numChunk; i++)
 				{
-					assignment[i] = floor(assignment[i]/chunkpershard);
+					assignment[i] = (int)floor(assignment[i]/chunkpershard);
 				}
 
 				cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
