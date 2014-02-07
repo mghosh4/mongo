@@ -1802,6 +1802,10 @@ namespace mongo {
                 //command return info
                 BSONObj info;
 
+                //global min and max (positive and negative infinities)
+                BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
+                BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
+
                 //conversion from arrays to vectors for bundling into bson
                 vector<string> removedReplicasVector(removedReplicas, removedReplicas + numShards);
                 vector<int> assignmentsVector(assignments, assignments + numChunks);
@@ -1824,8 +1828,11 @@ namespace mongo {
                     params.append("ns", ns);                                            //namespace
                     params.append("startTime", startTS[i]);                             //time from which oplog needs to be replayed                         
                     params.append("primary", primary[i]);                               //the primary to connect to (for oplog details)
-                    params.append("proposedKey", proposedKey);                          //the proposed key
+                    params.append("shardID", i);                                        //the id for this particular shard
                     params.append("numChunks", numChunks);                              //number of chunks
+                    params.append("proposedKey", proposedKey);                          //the proposed key
+                    params.append("globalMin", globalMin);                              //global min
+                    params.append("globalMax", globalMax);                              //global max
                     params.append("splitPoints", points);                               //split points
                     params.append("assignments", assignmentsVector);                    //the new assignments for chunks
                     params.append("removedReplicas", removedReplicasVector);            //the other removed replicas
