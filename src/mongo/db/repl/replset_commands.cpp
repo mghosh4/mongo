@@ -21,6 +21,8 @@
 #include "mongo/db/auth/action_set.h"
 #include "mongo/db/auth/action_type.h"
 #include "mongo/db/auth/authorization_manager.h"
+#include "mongo/db/oplogreader.h"
+#include "mongo/db/repl/rs_optime.h"
 #include "../cmdline.h"
 #include "../commands.h"
 #include "../repl.h"
@@ -630,6 +632,9 @@ namespace mongo {
 
 
     class CmdReplayOplog : public ReplSetCommand {
+    private:
+        OplogReader oplogReader;
+
     public:
         virtual void help( stringstream &help ) const {
             help << "{ {replayOplog : <oplogParams>} }";
@@ -648,7 +653,8 @@ namespace mongo {
             cout<<"[MYCODE_HOLLA] ";
         }
 
-        void printExtractedArgs(string& ns, OpTime& startTime, string& primary, BSONObj& proposedKey, int& numChunks,
+        void printExtractedArgs(string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks,
+                                    BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
                                     vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             printLogID();
             cout<<"Namespace is: "<<ns<<endl;
@@ -657,9 +663,15 @@ namespace mongo {
             printLogID();
             cout<<"Primary is: "<<primary<<endl;
             printLogID();
-            cout<<"Proposed key: "<<proposedKey.toString()<<endl;
+            cout<<"Shard id is: "<<shardID<<endl;
             printLogID();
             cout<<"Num chunks: "<<numChunks<<endl;
+            printLogID();
+            cout<<"Proposed key: "<<proposedKey.toString()<<endl;
+            printLogID();
+            cout<<"Global min: "<<globalMin.toString()<<endl;
+            printLogID();
+            cout<<"Global max: "<<globalMax.toString()<<endl;
             printLogID();
             cout<<"Split points: ";
             for(int i = 0; i < splitPoints.size(); i++) {
@@ -680,15 +692,9 @@ namespace mongo {
             cout<<endl;
         }
         bool checkAndExtractArgs(BSONObj oplogParams, string& errmsg,
-                                    string& ns,
-                                    OpTime& startTime,
-                                    string& primary,
-                                    BSONObj& proposedKey,
-                                    int& numChunks,
-                                    vector<BSONObj>& splitPoints,
-                                    vector<int>& assignments,
-                                    vector<string>& removedReplicas
-                                    ) {
+                                    string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, 
+                                    BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
+                                    vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             //namespace
             ns = oplogParams["ns"].String();
             if ( ns.size() == 0 ) {
@@ -716,6 +722,12 @@ namespace mongo {
                 return false;
             }
 
+            //shard id
+            shardID = oplogParams["shardID"].Int();
+
+            //number of chunks
+            numChunks = oplogParams["numChunks"].Int();
+
             //proposed key
             proposedKey = oplogParams["proposedKey"].Obj();
             if ( proposedKey.isEmpty() ) {
@@ -723,8 +735,19 @@ namespace mongo {
                 return false;
             }
 
-            //number of chunks
-            numChunks = oplogParams["numChunks"].Int();
+            //global min
+            globalMin = oplogParams["globalMin"].Obj();
+            if ( globalMin.isEmpty() ) {
+                errmsg = "no global min";
+                return false;
+            }
+
+            //global max
+            globalMax = oplogParams["globalMax"].Obj();
+            if ( globalMax.isEmpty() ) {
+                errmsg = "no global max";
+                return false;
+            }
 
             //split points
             vector<BSONElement> splitPointsRaw = oplogParams["splitPoints"].Array();
@@ -753,21 +776,17 @@ namespace mongo {
             if( !check(errmsg, result) )
                 return false;
 
-            printLogID();
-            cout<<"Caught a replay oplog command"<<endl;
-            printLogID();
-            cout<<"Command object is - " << cmdObj.toString() <<endl;
-
             //extract the arguments package
             BSONObj oplogParams = cmdObj["replayOplog"].Obj().getOwned();
-            printLogID();
-            cout<<"oplogParams are " << oplogParams.toString() << endl; 
 
             //declare the arguments we want
-            string ns;                                           //namespace
+            string ns;                                          //namespace
             OpTime startTime;                                   //time from which oplog needs to be replayed        
-            string primary;                               //the primary to connect to (for oplog details)
+            string primary;                               	    //the primary to connect to (for oplog details)
+            int shardID;                                        //the id for this shard
             BSONObj proposedKey;                                //the proposed key
+            BSONObj globalMin;                                  //global min
+            BSONObj globalMax;                                  //global max
             int numChunks;                                      //number of chunks
             vector<BSONObj> splitPoints;                        //split points
             vector<int> assignments;                            //the new assignments for chunks
@@ -776,14 +795,210 @@ namespace mongo {
             //do some checks to see we have all the info we require
             //also extract the arguments in the same call
             if( !checkAndExtractArgs(oplogParams, errmsg,
-                                        ns, startTime, primary, proposedKey, numChunks,
+                                        ns, startTime, primary, shardID, numChunks, 
+                                        proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas)) {
                 return false;
             }
 
-            printExtractedArgs(ns, startTime, primary, proposedKey, numChunks, splitPoints, assignments,removedReplicas);
+            printExtractedArgs(ns, startTime, primary, shardID, numChunks, 
+                                    proposedKey, globalMin, globalMax,
+                                    splitPoints, assignments,removedReplicas);
+
+            //replay the oplog
+            return replayOplog(errmsg, ns, startTime, primary, shardID, numChunks, 
+                                    proposedKey, globalMin, globalMax,
+                                    splitPoints, assignments,removedReplicas);
+        }
+
+        bool replayOplog(string& errmsg, string ns, OpTime startTime, string primary, int shardID, int numChunks,
+                                    BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax, 
+                                    vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
+
+            int iterations = 10;            //number of times to iterate
+            bool done = false;              //are we done yet?
+
+            //attempt to replay oplog 'iterations' times
+            for(int i = 0; i < iterations; i++) {
+                printLogID();
+                cout<<"Executing iteration of replayOnce: " << i <<endl;
+                if( replayOnce(errmsg, done, startTime, ns, primary, shardID, numChunks,
+                                    proposedKey, globalMin, globalMax,
+                                    splitPoints, assignments, removedReplicas) 
+                                && done) {
+                    //if replay once succeded and done is true, there were no more ops to replay
+                    printLogID();
+                    cout<<"Done in iterations: " << i <<endl;
+                    return true;
+                }
+
+                //if not, startTime is automatically the new start time and the next iteration of replayOnce will receive it.
+
+                //check if there were any errors
+                if(errmsg != "" ) {
+                    //there was an error
+                    return false;
+                }
+            }          
+            
+            //no success after 10 iterations :(
+            errmsg="Replaying oplog (multiple attempts) did not succeed";
+            return false;
+        }
+
+        bool replayOnce(string& errmsg, bool& done, OpTime& startTime, string ns, string primary, int shardID, int numChunks,
+                                    BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax,
+                                    vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
+           
+            bool success = false;           //the success variable
+
+            //get all the ops that need to be replayed
+            vector<BSONObj> opsToReplay;
+            success = getOpsToReplay(errmsg, startTime, ns, primary, opsToReplay);
+
+            if(success) {
+                printLogID();
+                cout<<"Operations to replay: "<<opsToReplay.size()<<endl;
+                //check if any more ops to replay
+                if (opsToReplay.size() == 0) {
+                    //no more ops to replay. say we are done!
+                    done = true;
+                } else {
+                    //replay 'em!
+                    success = replayOps(errmsg, opsToReplay, numChunks, 
+                                            proposedKey, globalMin, globalMax,
+                                            splitPoints, assignments, removedReplicas);
+                }
+            }
+
+            return success;
+        }
+
+        bool getOpsToReplay(string& errmsg, OpTime& startTime, string ns, string primary, vector<BSONObj>& opsToReplay) {
+            BSONObj info;       //return info
+            
+            printLogID();
+            cout<<"==== Getting ops to replay===="<<endl;
+            //TODO GOPAL: Can we connect one time and leave it?
+            //connect to primary
+            oplogReader.connect(primary);
+
+            //make a query
+            oplogReader.tailingQueryGTE(rsoplog, startTime);
+
+            //gather up thr results
+            BSONObj queryResults;
+            while (oplogReader.more())
+            {
+                queryResults = oplogReader.next();
+                //set new starttime
+                startTime = queryResults["ts"]._opTime();
+                printLogID();
+                cout<<"Oplog operation:  " <<queryResults.toString()<<endl;
+                //add it to all ops
+                opsToReplay.push_back(queryResults);
+            }
+            
+            //TODO GOPAL: Can we connect one time and leave it?
+            //snap this connection
+            oplogReader.resetConnection();
             return true;
         }
+
+        bool replayOps(string& errmsg, vector<BSONObj> opsToReplay, int numChunks, 
+                            BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax, 
+                            vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
+            
+            cout<<"==== Repelaying ops===="<<endl;
+            //fields in the oplog
+            const char *names[] = {"o", "ns", "op", "b"};
+            BSONElement fields[4];
+
+            for (vector<BSONObj>::iterator operation = opsToReplay.begin(); operation != opsToReplay.end(); operation++)
+            {
+                //get the fields out
+                operation->getFields(4, names, fields);
+                printLogID();
+                cout<<"Oplog operation:  " <<(*operation).toString()<<endl;
+                
+                //name of the operation
+                string name = fields[2].valuestrsafe();
+                const char *optype = name.c_str();                              //TOASK GOPAL: why pointer? Can i just keep name
+                
+                //nothing to do if operation is not insert, delete or update
+                if (!(*optype == 'i' || *optype == 'd' || *optype == 'u'))
+                    continue;
+
+                //namespace
+                const string ns = fields[1].valuestrsafe();
+
+                //the 'o' field
+                BSONObj o;
+                if (*optype == 'i' || *optype == 'd'){  //if operation is insert or delete, then operation data is in 'o'
+                    BSONObj inter = fields[0].wrap();
+                    o = inter["o"].Obj();
+                } else if (*optype == 'u') {    //if the operation is an update, its in 'o2'    
+                    o = (*operation)["o2"].Obj();
+                }
+
+                //get the value of the proposed key
+                BSONObj value = o[proposedKey.firstElementFieldName()].Obj();
+                printLogID();
+                cout << "Change string :" << o.toString() << " " << value.toString() << endl;
+
+                //attempt find which chunk this record will now go to
+                int chunkIndex;
+                vector<BSONObj>::iterator point = splitPoints.begin();
+                BSONObj prev;
+                for (int i = 0; i < numChunks; i++)
+                {
+                    BSONObj min = i > 0 ? prev : globalMin;
+                    BSONObj max = i == numChunks - 1 ? globalMax : *point;
+
+                    if ( min <= value && value < max)
+                        //found it! mark the chunk index
+                        chunkIndex = i;
+                        break;
+
+                    if (i < numChunks - 1)
+                    {
+                        prev = *point;
+                        point++;
+                    }
+                }
+
+                printLogID();
+                cout << "Operation " << o.toString() << " going to shard " << removedReplicas[assignments[chunkIndex]] << endl;
+                //make the connection
+                scoped_ptr<ScopedDbConnection> conn(
+                    ScopedDbConnection::getScopedDbConnection(
+                        removedReplicas[assignments[chunkIndex]] ) );
+
+                //get source count
+                int startCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+
+                //perform the operation
+                if (*optype == 'i'){
+                    conn->get()->insert(ns, o);
+                } else if (*optype == 'u') {
+                    BSONObj update = fields[0].wrap();
+                    conn->get()->update(ns, o, update, fields[3].booleanSafe());
+                }
+                else if (*optype == 'd')
+                    conn->get()->remove(ns, o, fields[3].booleanSafe());
+
+                //TODO GOPAL: do an error check if connections dont succeed
+
+                int endCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+                printLogID();
+                cout << "Start Count:" << startCount << " End Count:" << endCount << endl;
+
+                conn->done();
+            }
+
+            return true;
+        }
+
     } cmdReplayOplog;
 
     class CmdReplSetStepDown: public ReplSetCommand {
