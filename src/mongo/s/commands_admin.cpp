@@ -1523,6 +1523,16 @@ namespace mongo {
                                                for (int k = 0; k < chunkpershard; k++) 
 						       newdatainkr[i][j*chunkpershard+k] = datainkr[i][j];
 				
+				cout << "[WWT] NEWDATAINKR: with "<< numChunk<< " chunks and "<< chunkpershard<< " ChunkPerShard" << endl;
+				for (int i = 0; i < numChunk; i++)
+				{
+					cout << "[WWT] ";
+					for (int j = 0; j < numShards*chunkpershard; j++)
+						cout << newdatainkr[i][j] << "\t";
+					cout << endl;
+				}
+
+				
 				HungarianAlgo* algo = new HungarianAlgo();
 				algo->max_cost_assignment(datainkr,numChunk,numShards*chunkpershard,assignment);
 				for (int i = 0; i < numChunk; i++)
