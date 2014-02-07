@@ -5,14 +5,13 @@
 #include <climits>
 #include <string.h>
 
-#define DEBUG
 void HungarianAlgo::max_cost_assignment(long long ** datainkr, int numRow, int numColumn,int assignment[])
 {
 
 	#ifdef DEBUG
 	std::cout << "Munkres input matrix:" << std::endl;
-	  for ( unsigned int row = 0 ; row < numRow ; row++ ) {
-	    for ( unsigned int col = 0 ; col < numColumn ; col++ ) {
+	  for (  int row = 0 ; row < numRow ; row++ ) {
+	    for (  int col = 0 ; col < numColumn ; col++ ) {
               datainkr[row][col]=0-datainkr[row][col];
 	      std::cout.width(8);
 	      std::cout << datainkr[row][col] << ",";
@@ -72,8 +71,8 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     }
 	#ifdef DEBUG
 	std::cout << "Cost input matrix:" << std::endl;
-	  for ( unsigned int row = 0 ; row < nrow ; row++ ) {
-	    for ( unsigned int col = 0 ; col < ncol ; col++ ) {
+	  for (  int row = 0 ; row < nrow ; row++ ) {
+	    for (  int col = 0 ; col < ncol ; col++ ) {
 	      std::cout.width(8);
 	      std::cout << cost[row][col] << ",";
               
@@ -117,11 +116,11 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     ColCover = new bool[ncol];
     RowCover = new bool[nrow];
    
-    for ( unsigned int i = 0 ; i < ncol ; i++ ) {
+    for (  int i = 0 ; i < ncol ; i++ ) {
         ColCover[i] = false;
     }
 
-    for ( unsigned int i = 0 ; i < nrow ; i++ ) {
+    for (  int i = 0 ; i < nrow ; i++ ) {
         RowCover[i] = false;
     }
 
@@ -146,12 +145,9 @@ void HungarianAlgo::main_algorithm(int result[])
     }
     bool done = false;
     int step = 1;
-    int num=2;
     while(!done)
     {
         #ifdef DEBUG
-	std::cout << "number:" << num <<std::endl;
-	num++;
 	std::cout << "step:" << step <<std::endl;
         #endif
 
@@ -183,8 +179,8 @@ void HungarianAlgo::main_algorithm(int result[])
         //showCostMatrix();
 	#ifdef DEBUG
 	std::cout << "Cost matrix:" << std::endl;
-	  for ( unsigned int row = 0 ; row < nrow ; row++ ) {
-	    for ( unsigned int col = 0 ; col < ncol ; col++ ) {
+	  for (  int row = 0 ; row < nrow ; row++ ) {
+	    for (  int col = 0 ; col < ncol ; col++ ) {
 	      std::cout.width(8);
               if (mask[row][col] == 1 )
 	          std::cout << this->cost[row][col] <<"*"<< ",";
@@ -198,13 +194,13 @@ void HungarianAlgo::main_algorithm(int result[])
 	  std::cout << std::endl;
        
 	std::cout << "row cover:" << std::endl;
-	  for ( unsigned int row = 0 ; row < nrow ; row++ ) {
+	  for (  int row = 0 ; row < nrow ; row++ ) {
 	      std::cout.width(8);
 	      std::cout << this->RowCover[row] << ",";
 	  }
 	  std::cout << std::endl;
 	std::cout << "col cover:" << std::endl;
-	  for ( unsigned int col = 0 ; col < ncol ; col++ ) {
+	  for (  int col = 0 ; col < ncol ; col++ ) {
 	      std::cout.width(8);
 	      std::cout << this->ColCover[col] << ",";
 	  }
