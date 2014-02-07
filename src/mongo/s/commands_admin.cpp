@@ -1535,6 +1535,11 @@ namespace mongo {
 				
 				HungarianAlgo* algo = new HungarianAlgo();
 				algo->max_cost_assignment(datainkr,numChunk,numShards*chunkpershard,assignment);
+				cout << "[WWT] ASSIGNMENT:\n [MYCODE] ";
+				for (int i = 0; i < numChunk; i++)
+					cout << assignment[i] << "\t";
+				cout << "\n";
+
 				for (int i = 0; i < numChunk; i++)
 				{
 					assignment[i] = (int)floor(assignment[i]/chunkpershard);
