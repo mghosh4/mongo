@@ -1079,7 +1079,7 @@ namespace mongo {
 				int assignment[numChunk];
                                 bool loadBalance = cmdObj["loadBalance"].trueValue();
                                 log() << "[WWT] load balance = " << loadBalance << endl;
-                                if(loadBalance)
+                                if(true)
                                     runLBAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
                                 else
 				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
