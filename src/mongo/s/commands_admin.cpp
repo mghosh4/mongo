@@ -1823,6 +1823,9 @@ namespace mongo {
                             ScopedDbConnection::getScopedDbConnection(
                                 removedReplicas[i] ) );
 
+                    //TODO GOPAL: Remove this!
+                    startTS[i] = OpTime(1,1);
+
                     //bundle the params
                     BSONObjBuilder params;
                     params.append("ns", ns);                                            //namespace
