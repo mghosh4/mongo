@@ -652,7 +652,6 @@ namespace mongo {
         
         virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
             //check if there is already an error message, if there is return immediately
-            //TODO GOPAL: See how to recognize this failure at the other end
             if( !check(errmsg, result) )
                 return false;
 
@@ -998,9 +997,8 @@ namespace mongo {
                     if(ns == nsOrig) {
                         //get the value of the proposed key
                         //TOCHECK GOPAL: How do you do this the right way?
-                        //1. do has a field
-                        //2. somehow extract the field
-                        //BSONObj value = BSON(proposedKey.firstElementFieldName() << o[proposedKey.firstElementFieldName()]);
+                        //1. do hasField
+                        //2. What do you do if does not?
                         BSONObj value  = o.extractFields(proposedKey);
                         printLogID();
                         cout << "Value string : " << value.toString() << endl;
@@ -1084,17 +1082,34 @@ namespace mongo {
             //perform the operation
             if (op == "i"){
                 conn->get()->insert(ns, o);
+                
+                printLogID();
+                string errmsg = conn->get()->getLastError();
+                cout<<"Insert ErrMsg: "<<errmsg<<endl;
             } else if (op == "u") {
-                BSONObj updateCriteria = opToReplay["o2"].Obj();
-                bool upsert = opToReplay["b"].Bool();
-                conn->get()->update(ns, o, updateCriteria, upsert);
+                //TODO GOPAL: Always check if field exists or do some kind of safe get
+                //TODO GOPAL: handle a 'multi' field
+                BSONObj query = opToReplay["o2"].Obj();
+                cout<<"o2 is: " <<query.toString()<<endl;
+                bool upsert = opToReplay["b"].eoo() ? false : opToReplay["b"].Bool();
+                conn->get()->update(ns, query, o, upsert);
+                
+                printLogID();
+                string errmsg = conn->get()->getLastError();
+                cout<<"Update ErrMsg: "<<errmsg<<endl;        
             } else if (op == "d") {
-                bool justOne = opToReplay["b"].Bool();
+                bool justOne = opToReplay["b"].eoo()? false : opToReplay["b"].Bool();
                 conn->get()->remove(ns, o, justOne);
+                
+                printLogID();
+                string errmsg = conn->get()->getLastError();
+                cout<<"Remove ErrMsg: "<<errmsg<<endl;
+        
             } else {
                 //TODO GOPAL: Handle error
                 printLogID();
                 cout<<"Unrecongnized op in replayOp!"<<endl;
+                success = false;
             }
 
             int endCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
