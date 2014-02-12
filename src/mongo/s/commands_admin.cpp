@@ -973,9 +973,7 @@ namespace mongo {
 		        conn->done();
 
                 // 1. Calculate the splits for the new shard key
-		        scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
-                        configServer.getPrimary().getConnString() ) );
-                cout << "[MYCODE] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\n";
+                log() << "[MYCODE_TIME] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\n";
                 BSONObjSet splitPoints; 
                 int numChunk = manager->numChunks();
 
@@ -986,7 +984,7 @@ namespace mongo {
                 long long rowCount = 0;
 				for (int i = 0; i < numShards; i++)
                 {
-					cout << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
+					log() << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
                     scoped_ptr<ScopedDbConnection> shardconn(
                     	ScopedDbConnection::getScopedDbConnection(
                            	shards[i].getConnString() ) );
@@ -996,7 +994,7 @@ namespace mongo {
                     shardconn->done();
                 }
 
-                cout << "[MYCODE] rowCount: " << rowCount << endl;
+                log() << "[MYCODE_TIME] rowCount: " << rowCount << endl;
 
                 long long maxObjectPerChunk = rowCount / numChunk;
                 if (maxObjectPerChunk > Chunk::MaxObjectPerChunk)
@@ -1006,33 +1004,25 @@ namespace mongo {
 
 				numChunk = splitPoints.size() + 1;
                 for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
-                    cout << "[MYCODE] Split Points:" << it->toString() << endl;
+                    log() << "[MYCODE] Split Points:" << it->toString() << endl;
 
-				//2. Disable the balancer
-				try { 
-					// look for the stop balancer marker
-					BSONObj b1 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
-					cout << "[MYCODE] BEFORE UPDATE:" << b1.toString();
-					conn1->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << true )) );
-					BSONObj b2 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
-					cout << "[MYCODE] AFTER UPDATE:" << b2.toString();
-				}
-				catch( DBException& e ){
-					conn1->done();
-					return false;
-				}
+                log() << "[MYCODE_TIME] Split Points Done" << endl;
 
+                // 2. Disable the balancer
+                setBalancerState(false);
 
-				// 3. create replica sets
+                log() << "[MYCODE_TIME] Balancer Turned off" << endl;
+
+				// 3. create replica sets and collect replica ids
                 scoped_ptr<ScopedDbConnection> shardconn(
                 	ScopedDbConnection::getScopedDbConnection(
                        	shards[0].getConnString() ) );
 
-				cout << "[MYCODE] Before isMaster call" << endl;
+				log() << "[MYCODE_TIME] Before isMaster call" << endl;
 				int numHosts = 0;
 				BSONObj info;
 				shardconn->get()->runCommand("admin", BSON("isMaster" << 1), info);
-				cout << "[MYCODE] After isMaster call" << endl;
+				log() << "[MYCODE_TIME] After isMaster call" << endl;
 				BSONObjIterator iter(info["hosts"].Obj());
 				while (iter.more())
 				{
@@ -1040,17 +1030,18 @@ namespace mongo {
 					numHosts++;
 				}
 
-				cout << "[MYCODE] NumHosts:" << numHosts << endl;
+				log() << "[MYCODE_TIME] NumHosts:" << numHosts << endl;
 				shardconn->done();
 
 				string **replicaSets = new string*[numHosts];
 				for (int i = 0; i < numHosts; i++)
 					replicaSets[i] = new string[numShards];
 				collectReplicas(ns, replicaSets, shards, numShards);
+				log() << "[MYCODE_TIME] Replicas Collected" << endl;
 
 				map<string, int> hostIDMap;
 				collectIDs(shards, numShards, hostIDMap);
-				cout << "[MYCODE] hostIDMap size:" << hostIDMap.size() << endl;
+				log() << "[MYCODE_TIME] IDs Collected hostIDMap size:" << hostIDMap.size() << endl;
 
 				for (int i = 0; i < numShards; i++)
 				{
@@ -1069,24 +1060,27 @@ namespace mongo {
 				for (int i = 0; i < numShards; i++)
 					primaryReplicas[i] = replicaSets[numHosts - 1][i];
 
+                // 4. Stopping the first set of replicas
 				OpTime currTS[numShards];
-				log() << "[MYCODE] Stopping first set of hosts" << endl;
+				log() << "[MYCODE_TIME] Stopping first set of hosts" << endl;
 				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
 
-				// 3. Run the algorithm
-				log() << "[MYCODE] Running the algorithm" << endl;
+				// 5. Run the algorithm
+				log() << "[MYCODE_TIME] Running the algorithm" << endl;
 				int assignment[numChunk];
 				runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
 
-				log() << "[MYCODE] Reconfiguring first set of hosts" << endl;
+                // 6. Reconfiguring the first set of replicas
+				log() << "[MYCODE_TIME] Reconfiguring first set of hosts" << endl;
 				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment);
 				if (!success)
 				{
-					conn1->done();
+				    delete[] replicaSets;
+                    setBalancerState(true);
 					return false;
 				}
 
-				log() << "[MYCODE] Checking Timestamp before starting secondaries" << endl;
+				log() << "[MYCODE_TIME] Checking Timestamp before starting secondaries" << endl;
 
 				OpTime newTS[numShards];
 				checkTimestamp(removedReplicas, numShards, newTS);
@@ -1094,9 +1088,9 @@ namespace mongo {
 				for (int i = 0; i < numShards; i++)
 					primaryReplicas[i] = replicaSets[0][i];
 
+				log() << "[MYCODE_TIME] Stopping secondary set of replicas" << endl;
 				for (int j = 1; j < numHosts; j++)
 				{
-					log() << "[MYCODE] Stopping set of replicas" << endl;
 					cout << "[MYCODE] Stopping replicas:";
 					for (int i = 0; i < numShards; i++)
 					{
@@ -1105,12 +1099,13 @@ namespace mongo {
 					}
 					cout << endl;
 
+                    // 7. Stopping the secondary replicas
 					replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, false);
 				}
 
+				log() << "[MYCODE_TIME] Reconfiguring secondary set of replicas" << endl;
 				for (int j = 1; j < numHosts; j++)
 				{
-					log() << "[MYCODE] Stopping set of replicas" << endl;
 					cout << "[MYCODE] Reconfiguring replicas:";
 					for (int i = 0; i < numShards; i++)
 					{
@@ -1119,34 +1114,48 @@ namespace mongo {
 					}
 					cout << endl;
 
+                    // 8. Reconfiguring the secondary replicas
 					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment);
 					if (!success)
 					{
-                		conn1->done();
+				        delete[] replicaSets;
+                        setBalancerState(true);
 						return false;
 					}
 				}
 				
 				delete[] replicaSets;
 
-				//Disable the balancer
-				try {
-					// look for the stop balancer marker 
-					BSONObj b3 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
-					cout << b3.toString(); 
-					conn1->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << false )) ); 
-					BSONObj b4 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
-					cout << b4.toString(); 
-				}
-				catch( DBException& e ){ 
-					conn1->done();
-					return false; 
-				}
-                conn1->done();
+                // 9. Enabling the balancer
+                setBalancerState(true);
 
 				result.append("millis", t.millis());
+
+				log() << "[MYCODE_TIME] Resharding Complete" << endl;
+
 				return true;
 			}
+
+            void setBalancerState(bool state)
+            {
+		        scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
+                        configServer.getPrimary().getConnString() ) );
+
+				//2. Disable the balancer
+				try { 
+					// look for the stop balancer marker
+					BSONObj b1 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
+					log() << "[MYCODE] BEFORE UPDATE:" << b1.toString() << endl;
+					conn1->get()->update( SettingsType::ConfigNS, BSON( "_id" << "balancer" ), BSON( "$set" << BSON( "stopped" << !state )), true );
+					BSONObj b2 = conn1->get()->findOne( SettingsType::ConfigNS, BSON( "_id" << "balancer" ) );
+					log() << "[MYCODE] AFTER UPDATE:" << b2.toString() << endl;
+				}
+				catch( DBException& e ){
+                    log() << "[MYCODE] Exception trying to disable/enable balancer" << endl;
+				}
+
+                conn1->done();
+            }
 
             void pickSplitVector( BSONObjSet& splitPoints, const string ns, BSONObj shardKey, BSONObj min, BSONObj max, int chunkSize /* bytes */, int maxPoints, int maxObjs ) const {
                 // Ask the mongod holding this chunk to figure out the split points.
@@ -1157,7 +1166,7 @@ namespace mongo {
 
                 for (int i = 0; i < numShards; i++)
                 {
-                    cout << "[MYCODE] Pick split Vector\n";
+                    log() << "[MYCODE] Pick split Vector\n";
                     DBConfigPtr config = grid.getDBConfig( ns , false );
                     scoped_ptr<ScopedDbConnection> conn(
                             ScopedDbConnection::getInternalScopedDbConnection( newShards[i].getConnString() ) );
@@ -1175,11 +1184,11 @@ namespace mongo {
         
                     if ( ! conn->get()->runCommand( "admin" , cmdObj , result )) {
                         conn->done();
-                        cout << "[MYCODE] Pick split Vector cmd failed\n";
+                        log() << "[MYCODE] Pick split Vector cmd failed\n";
                         return;
                     }
         
-                    cout << "[MYCODE] Pick split Vector cmd done\n";
+                    log() << "[MYCODE] Pick split Vector cmd done\n";
                     BSONObjIterator it( result.getObjectField( "splitKeys" ) );
                     while ( it.more() ) {
                         splitPoints.insert( it.next().Obj().getOwned() );
@@ -1193,56 +1202,49 @@ namespace mongo {
                 int numShards = shards.size();
 				int numChunk = splitPoints.size() + 1;
 				try {
-					// 3. Query for all the data
-					//vector<BSONObj> data[numShards];
-					//log() << "[MYCODE] Querying for all the data" << endl;
-					//queryData(ns, removedReplicas, numShards, shardKeyPattern.key(), proposedKey, data, key2_card);
-					//cout << "[MYCODE] KEY2 CARDINALITY: " << key2_card << endl;
-
-					// 5. Chunk Migration
-					log() << "[MYCODE] Migrating Chunk" << endl;
+					// 1. Chunk Migration
+					log() << "[MYCODE_TIME] Migrating Chunk" << endl;
 					migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
 
 					/*int iteration = 0;
 
 					while (iteration <= 10)
 					{
-						log() << "[MYCODE] One iteration of oplog replay" << endl;
+						log() << "[MYCODE_TIME] One iteration of oplog replay" << endl;
 
-						// 6. Collect Oplog
+						// 2. Collect Oplog
 						vector<BSONObj> allOps;
 						collectOplog(ns, shards, currTS, allOps, primary);
+						log() << "[MYCODE_TIME] Oplog Collected" << endl;
 
 						if (!allOps.size())
 						{
-							cout << "[MYCODE] No more ops to replay" << endl;
+							log() << "[MYCODE] No more ops to replay" << endl;
 							break;
 						}
 
-						// 7. Replay Oplog
+						// 3. Replay Oplog
 						replayOplog(allOps, proposedKey, key2_card, numChunk, assignment, removedReplicas);
+						log() << "[MYCODE_TIME] Oplog Replayed" << endl;
 						iteration++;
 					}*/
 				}
 				catch(DBException e)
 				{
-					// 8. Replica return as primary
 					replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
 
 					errmsg = e.what();
 					return false;
 				}
 
-				// 8. Replica return as primary
-				log() << "[MYCODE] Replica Return" << endl;
+				// 4. Replica return as primary
+				log() << "[MYCODE_TIME] Replica Return" << endl;
 				replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
-
-				//Shard::reloadShardInfo();
 
 				if (configUpdate)
 				{
-					// 9. Update Config DB
-					log() << "[MYCODE] Update Config" << endl;
+					// 5. Update Config DB
+					log() << "[MYCODE_TIME] Update Config" << endl;
 					updateConfig(ns, proposedKey, splitPoints, numChunk, assignment);
 				}
 
