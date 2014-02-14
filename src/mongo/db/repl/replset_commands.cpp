@@ -989,8 +989,8 @@ namespace mongo {
                 //get the op to replay
                 BSONObj opToReplay = opsToReplay[i];
 
-                //printLogID();
-                //cout<<"Currently replaying oplog entry: " <<opToReplay.toString()<<endl;
+                printLogID();
+                cout<<"Currently replaying oplog entry: " <<opToReplay.toString()<<endl;
 
                 //get the operation
                 string op = opToReplay["op"].String();
@@ -1042,6 +1042,9 @@ namespace mongo {
                                 cout<<"Replay op error: "<<opToReplay.toString()<<endl;
                                 success = false;
                                 //TODO GOPAL: Handle error condition
+                            } else {
+                                printLogID();
+                                cout<<"====replayOp done====="<<endl;
                             }
                         }
                     } else {
@@ -1081,8 +1084,8 @@ namespace mongo {
         }
 
         bool replayOp(string ns, string destMachine, string op, BSONObj o, BSONObj opToReplay) {
-            //printLogID();
-            //cout<<"====running replayOp====="<<endl;
+            printLogID();
+            cout<<"====running replayOp====="<<endl;
             bool success = true;
             //make the connection
             scoped_ptr<ScopedDbConnection> conn(
@@ -1111,6 +1114,7 @@ namespace mongo {
                 //printLogID();
                 //cout<<"o2 is: " <<query.toString()<<endl;
                 bool upsert = opToReplay["b"].eoo() ? false : opToReplay["b"].Bool();
+                //TODO GOPAL: see if this needs to be casted as query. Seems to work even without a cast.. for now
                 conn->get()->update(ns, query, o, upsert);
                 
                 string errmsg = conn->get()->getLastError();
