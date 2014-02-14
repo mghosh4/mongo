@@ -82,6 +82,7 @@ void run(string ns, long long range) {
         else
         {
             cout << "Returned result: FAILED" << endl;
+		    cout << timeStr << " " << INT_MAX << endl;
         }
 
 		usleep(100000);
