@@ -1095,7 +1095,7 @@ namespace mongo {
             //TODO GOPAL: do an error check if connections dont succeed
             
             //get source count
-            int startCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+            //int startCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
 
             //perform the operation
             if (op == "i"){
@@ -1140,7 +1140,7 @@ namespace mongo {
                 success = false;
             }
 
-            int endCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+            //int endCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
             //printLogID();
             //cout << "Start Count:" << startCount << " End Count:" << endCount << endl;
 
