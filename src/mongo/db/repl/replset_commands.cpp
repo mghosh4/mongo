@@ -993,18 +993,40 @@ namespace mongo {
                 cout<<"Currently replaying oplog entry: " <<opToReplay.toString()<<endl;
 
                 //get the operation
-                string op = opToReplay["op"].String();
+                string op;
+                if( opToReplay["op"].type() == mongo::String ){
+                    op = opToReplay["op"].String();  
+                } else {
+                    printLogID();
+                    cout<<"Did not get op of type string in operation! Op: " << opToReplay.toString() << endl;
+                    return false;
+                }
                 //printLogID();
                 //cout<<"op is: " <<op<<endl;
                 //do actions only if op is insert, update or delete
                 if( op == "i" || op == "u" || op == "d") { //TOASK GOPAL: Why? What are the other kind of operations?
                     //get the namespace
-                    string ns = opToReplay["ns"].String();
+                    string ns;
+                    if( opToReplay["ns"].type() == mongo::String){
+                        ns = opToReplay["ns"].String();  
+                    } else {
+                        printLogID();
+                        cout<<"Did not get ns of type string in operation! Op: " << opToReplay.toString() << endl;
+                        return false;
+                    }
                     //printLogID();
                     //cout<<"ns is: " <<ns<<endl;
 
                     //get the 'o' field
-                    BSONObj o = opToReplay["o"].Obj();
+                    BSONObj o;
+                    if( opToReplay["o"].type() == Object){
+                        o = opToReplay["o"].Obj();  
+                    } else {
+                        printLogID();
+                        cout<<"Did not get o of type object in operation! Op: " << opToReplay.toString() << endl;
+                        return false;
+                    }
+
                     //printLogID();
                     //cout<<"o is: " <<o.toString()<<endl;
 
@@ -1015,6 +1037,7 @@ namespace mongo {
                         //1. do hasField
                         //2. What do you do if does not?
                         BSONObj value  = o.extractFields(proposedKey);
+
                         //printLogID();
                         //cout << "Value string : " << value.toString() << endl;
 
@@ -1047,6 +1070,7 @@ namespace mongo {
                                 cout<<"====replayOp done====="<<endl;
                             }
                         }
+              
                     } else {
                         //TODO GOPAL: replay a non resharded operation
                         //obtain the object id
@@ -1098,46 +1122,56 @@ namespace mongo {
             //int startCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
 
             //perform the operation
-            if (op == "i"){
-                conn->get()->insert(ns, o);
-                
-                
-                string errmsg = conn->get()->getLastError();
-                if(errmsg != "") {
+            try {
+                if (op == "i"){
+                    conn->get()->insert(ns, o);
+                    
+                    
+                    string errmsg = conn->get()->getLastError();
+                    if(errmsg != "") {
+                        printLogID();
+                        cout<<"Insert ErrMsg: " << errmsg << " Op: " << opToReplay.toString() << endl;
+                    }
+                    
+                } else if (op == "u") {
+                    //TODO GOPAL: handle a 'multi' field
+                    BSONObj query;
+                    if( opToReplay["o2"].type() == Object) {
+                        query = opToReplay["o2"].Obj();
+                    } else {
+                        cout<<"o2 field not object ! Op: "<<opToReplay.toString() << endl;
+                        return false;
+                    }
+                    //printLogID();
+                    //cout<<"o2 is: " <<query.toString()<<endl;
+                    bool upsert = opToReplay["b"].eoo() ? false : opToReplay["b"].Bool();
+                    //TODO GOPAL: see if this needs to be casted as query. Seems to work even without a cast.. for now
+                    conn->get()->update(ns, query, o, upsert);
+                    
+                    string errmsg = conn->get()->getLastError();
+                    if(errmsg != "") {
+                        printLogID();
+                        cout<<"Update ErrMsg: " << errmsg << " Op: " << opToReplay.toString() << endl;
+                    }       
+                } else if (op == "d") {
+                    bool justOne = opToReplay["b"].eoo()? false : opToReplay["b"].Bool();
+                    conn->get()->remove(ns, o, justOne);
+                    
+                    
+                    string errmsg = conn->get()->getLastError();
+                    if(errmsg != "") {
+                        printLogID();
+                        cout<<"Remove ErrMsg: " << errmsg << " Op: " << opToReplay.toString() << endl;
+                    }
+            
+                } else {
+                    //TODO GOPAL: Handle error
                     printLogID();
-                    cout<<"Insert ErrMsg: " << errmsg << " Op: " << opToReplay.toString() << endl;
+                    cout<<"Unrecongnized op in replayOp! Op: " << opToReplay.toString() << endl;
+                    success = false;
                 }
-                
-            } else if (op == "u") {
-                //TODO GOPAL: handle a 'multi' field
-                BSONObj query = opToReplay["o2"].Obj();
-                //printLogID();
-                //cout<<"o2 is: " <<query.toString()<<endl;
-                bool upsert = opToReplay["b"].eoo() ? false : opToReplay["b"].Bool();
-                //TODO GOPAL: see if this needs to be casted as query. Seems to work even without a cast.. for now
-                conn->get()->update(ns, query, o, upsert);
-                
-                string errmsg = conn->get()->getLastError();
-                if(errmsg != "") {
-                    printLogID();
-                    cout<<"Update ErrMsg: " << errmsg << " Op: " << opToReplay.toString() << endl;
-                }       
-            } else if (op == "d") {
-                bool justOne = opToReplay["b"].eoo()? false : opToReplay["b"].Bool();
-                conn->get()->remove(ns, o, justOne);
-                
-                
-                string errmsg = conn->get()->getLastError();
-                if(errmsg != "") {
-                    printLogID();
-                    cout<<"Remove ErrMsg: " << errmsg << " Op: " << opToReplay.toString() << endl;
-                }
-        
-            } else {
-                //TODO GOPAL: Handle error
-                printLogID();
-                cout<<"Unrecongnized op in replayOp! Op: " << opToReplay.toString() << endl;
-                success = false;
+            } catch (DBException e) {
+                cout<<"Exception when playing op " << opToReplay.toString() << ". Exception is " << e.toString() << endl;
             }
 
             //int endCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
