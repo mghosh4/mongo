@@ -1209,24 +1209,26 @@ namespace mongo {
 					log() << "[MYCODE_TIME] Migrating Chunk" << endl;
 					migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
 
-                    // 2. Oplog Replay
-					log() << "[MYCODE_TIME] Replaying Oplog" << endl;
-                    replayOplog(ns, proposedKey, splitPoints, 
-                                numShards, primary, removedReplicas, currTS, 
-                                numChunk, assignment, 
-                                errmsg);
 				}
 				catch(DBException e)
 				{
 					replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
-
 					errmsg = e.what();
 					return false;
 				}
 
+                // 2. Oplog Replay
+                log() << "[MYCODE_TIME] Replaying Oplog" << endl;
+
+                replayOplog(ns, proposedKey, splitPoints, 
+                            numShards, primary, removedReplicas, currTS, 
+                            numChunk, assignment, 
+                            errmsg);
+
 				// 3. Replica return as primary
 				log() << "[MYCODE_TIME] Replica Return" << endl;
 				replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
+            
 
 				if (configUpdate)
 				{
@@ -1311,24 +1313,35 @@ namespace mongo {
                         replica ) );
 
                 //attempt to tell mongod to run the command
-                try {
-                    //make the connection and issue the command
-                    cout<<"[MYCODE_HOLLA] Making a connection to "<< replica <<endl;
-                    
-                    if( !conn->get()->runCommand("admin", BSON("replayOplog" << oplogParams), info)) {
-                        cout<<"[MYCODE_HOLLA] Command failed"<<endl;
-                        string errmsg = conn->get()->getLastError();
-                        cout<<"[MYCODE_HOLLA] ErrMsg: "<<errmsg<<endl;
-                        //TODO GOPAL: What do you do if this happens? Retry/Fail?
-                    } else {
-                        //TODO GOPAL: Do we want anything from info?
-                        cout<<"[MYCODE_HOLLA] Info has: "<<info.toString()<<endl;
+                bool done = true;
+                int trials = 0;
+                do {
+                    done = true;
+                    try {
+                        //make the connection and issue the command
+                        cout<<"[MYCODE_HOLLA] Making a connection to "<< replica <<endl;
+                        
+                        if( !conn->get()->runCommand("admin", BSON("replayOplog" << oplogParams), info)) {
+                            cout<<"[MYCODE_HOLLA] Replay Command failed"<<endl;
+                            string errmsg = conn->get()->getLastError();
+                            cout<<"[MYCODE_HOLLA] ErrMsg: "<<errmsg<<endl;
+                            //TODO GOPAL: What do you do if this happens? Retry/Fail?
+                        } else {
+                            //TODO GOPAL: Do we want anything from info?
+                            cout<<"[MYCODE_HOLLA] Replay Info has: "<<info.toString()<<endl;
+                        }
                     }
-                }
-                catch(DBException e){
-                    //oops something went wrong
-                    //TODO GOPAL: What do you do if this happens? Retry/Fail?
-                    cout << "[MYCODE_HOLLA] replayOplog" << " threw exception: " << e.toString() << endl;
+                    catch(DBException e){
+                        //oops something went wrong
+                        //TODO GOPAL: What do you do if this happens? Retry/Fail?
+                        cout << "[MYCODE_HOLLA] replayOplog" << " threw exception: " << e.toString() << endl;
+                        done = false;
+                        trials++;
+                    }
+                } while (!done && trials < 10);
+
+                if(!done && trials >= 10) {
+                    cout << "[MYCODE_HOLLA] Could not replay oplog on " << replica << endl;
                 }
                 //close the connection
                 conn->done();

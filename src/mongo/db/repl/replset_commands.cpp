@@ -952,10 +952,14 @@ namespace mongo {
             //connect to primary
             oplogReader.connect(primary);
 
+            if(oplogReader.haveCursor()) {
+                oplogReader.resetCursor();
+            }
+
             //make a query
             oplogReader.tailingQueryGTE(rsoplog, startTime);
 
-            //gather up thr results
+            //gather up the results
             BSONObj queryResult;
             while (oplogReader.more())
             {
@@ -985,7 +989,7 @@ namespace mongo {
             cout<<"==== Replaying ops===="<<endl;
             //TODO GOPAL: Handle error conditions
             //iterate through each op, replaying it
-            for (int i = 0; i < (int)opsToReplay.size(); i++) {
+            for (int i = 1; i < (int)opsToReplay.size(); i++) { //ignore very first one, thats already been executed
                 //get the op to replay
                 BSONObj opToReplay = opsToReplay[i];
 
@@ -999,7 +1003,7 @@ namespace mongo {
                 } else {
                     printLogID();
                     cout<<"Did not get op of type string in operation! Op: " << opToReplay.toString() << endl;
-                    return false;
+                    continue;
                 }
                 //printLogID();
                 //cout<<"op is: " <<op<<endl;
@@ -1012,7 +1016,7 @@ namespace mongo {
                     } else {
                         printLogID();
                         cout<<"Did not get ns of type string in operation! Op: " << opToReplay.toString() << endl;
-                        return false;
+                        continue;
                     }
                     //printLogID();
                     //cout<<"ns is: " <<ns<<endl;
@@ -1024,7 +1028,7 @@ namespace mongo {
                     } else {
                         printLogID();
                         cout<<"Did not get o of type object in operation! Op: " << opToReplay.toString() << endl;
-                        return false;
+                        continue;
                     }
 
                     //printLogID();

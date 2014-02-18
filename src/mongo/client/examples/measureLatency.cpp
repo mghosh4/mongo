@@ -55,8 +55,8 @@ void run(string router, string ns, long long start, long long range, int sleepTi
     bool flag;
     BSONObj b;
     srand(time(NULL));
-    long long user_id;
-    long long number;
+    long long user_id = -1;
+    long long number = -1;
     int opSelector;
 
 
