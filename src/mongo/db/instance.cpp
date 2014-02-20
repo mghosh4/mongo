@@ -347,6 +347,18 @@ namespace mongo {
         bool isCommand = false;
         const char *ns = m.singleData()->_data + 4;
 
+        BSONObjBuilder b;
+        const char *rsSettingNS = "local.settings";
+        DBDirectClient cli;
+        BSONObj throttleObj = cli.findOne(rsSettingNS, BSON( "_id" << "throttle" ));
+        bool stopped = throttleObj["stopped"].Bool();
+        if (stopped && opIsWrite(op))
+        {
+            b.append("err", "write throttled");
+            replyToQuery(0, m, dbresponse, b.obj());
+            return;
+        }
+
         if ( op == dbQuery ) {
             if( strstr(ns, ".$cmd") ) {
                 isCommand = true;

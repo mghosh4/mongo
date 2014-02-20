@@ -1219,17 +1219,20 @@ namespace mongo {
 				log() << "[MYCODE_TIME] Throttling Writes" << endl;
 				replicaThrottle(ns, numShards, primary, true);
 
-				// 3. Replica return as primary
-				log() << "[MYCODE_TIME] Replica Return" << endl;
-				replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
-            
-
 				if (configUpdate)
 				{
 					// 4. Update Config DB
 					log() << "[MYCODE_TIME] Update Config" << endl;
 					updateConfig(ns, proposedKey, splitPoints, numChunk, assignment);
 				}
+
+				// 3. Replica return as primary
+				log() << "[MYCODE_TIME] Replica Return" << endl;
+				replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
+
+				// 3. Write UnThrottle
+				log() << "[MYCODE_TIME] UnThrottling Writes" << endl;
+				replicaThrottle(ns, numShards, primary, false);
 
                 return true;
             }
@@ -1413,7 +1416,7 @@ namespace mongo {
 				}
 			}
 
-			void collectOplog(string ns, vector<Shard> shards, OpTime startTS[], vector<BSONObj>& allOps, string primary[])
+			/*void collectOplog(string ns, vector<Shard> shards, OpTime startTS[], vector<BSONObj>& allOps, string primary[])
 			{
                 int numShards = shards.size();
 
@@ -1475,10 +1478,10 @@ namespace mongo {
 
 						if ( min <= value && value < max)
 							break;
-						/*if ((i == 0 && value < (i + 1) * key2_range) ||
+						if ((i == 0 && value < (i + 1) * key2_range) ||
 							(i == numChunk - 1 && value >= i * key2_range) ||
 							(value >= i * key2_range && value < (i + 1) * key2_range))
-							break;*/
+							break;
 
 						if (i < numChunk - 1)
 						{
@@ -1512,44 +1515,6 @@ namespace mongo {
 
 					conn->done();
 				}
-			}
-
-			/*void queryData(string ns, string replicas[], int numShards, BSONObj oldKey, BSONObj newKey, vector<BSONObj> data[], int &key2_card)
-			{
-				double min = INT_MAX, max = INT_MIN;
-				for (int i = 0; i < numShards; i++)
-				{
-					//Connecting to a removed server
-					try
-					{
-                		scoped_ptr<ScopedDbConnection> conn(
-                			ScopedDbConnection::getInternalScopedDbConnection(
-								replicas[i] ) );
-
-						BSONObjBuilder b;
-						b.appendElements(oldKey);
-						b.appendElements(newKey);
-						BSONObj fields = b.done();
-						scoped_ptr<DBClientCursor> cursor(conn->get()->query(ns, BSONObj(), 0, 0, &fields, QueryOption_SlaveOk));
-						// printf("DATA: Server %d\n", i);
-						while (cursor->more()) {
-							BSONObj output = cursor->next().getOwned();
-							double val = output[newKey.firstElementFieldName()].Double();
-							if (max < val)
-								max = val;
-							if (min > val)
-								min = val;
-							data[i].push_back(output);
-							// printf("DATA: %s\n", output.toString().c_str());
-						}
-						conn->done();
-					}
-					catch (DBException e)
-					{
-						cout << "[MYCODE] removing" << " threw exception: " << e.toString() << endl;
-					}
-				}
-				key2_card = (int)ceil(max - min + 1);
 			}*/
 
 			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])

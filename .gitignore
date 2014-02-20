@@ -140,6 +140,7 @@ debian/mongodb
 *.files
 *.includes
 *.orig
+*.nfs*
 
 #built by Visual Studio
 src/mongo/base/error_codes.cpp
