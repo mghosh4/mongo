@@ -988,7 +988,6 @@ namespace mongo {
                     scoped_ptr<ScopedDbConnection> shardconn(
                     	ScopedDbConnection::getScopedDbConnection(
                            	shards[i].getConnString() ) );
-
                     
                     rowCount += shardconn->get()->count(ns);
                     shardconn->done();
@@ -1204,26 +1203,21 @@ namespace mongo {
 			{
                 int numShards = shards.size();
 				int numChunk = splitPoints.size() + 1;
-				try {
-					// 1. Chunk Migration
-					log() << "[MYCODE_TIME] Migrating Chunk" << endl;
-					migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
 
-				}
-				catch(DBException e)
-				{
-					replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
-					errmsg = e.what();
-					return false;
-				}
+				// 1. Chunk Migration
+				log() << "[MYCODE_TIME] Migrating Chunk" << endl;
+				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
 
                 // 2. Oplog Replay
                 log() << "[MYCODE_TIME] Replaying Oplog" << endl;
-
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTS, 
                             numChunk, assignment, 
                             errmsg);
+
+				// 3. Write Throttle
+				log() << "[MYCODE_TIME] Throttling Writes" << endl;
+				replicaThrottle(ns, numShards, primary, true);
 
 				// 3. Replica return as primary
 				log() << "[MYCODE_TIME] Replica Return" << endl;
@@ -1927,6 +1921,41 @@ namespace mongo {
 				try
 				{
 					conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
+					string errmsg = conn->get()->getLastError();
+					cout << "[MYCODE] Replica Return:" << errmsg << endl;
+				}
+				catch(DBException e){
+					cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
+				}
+
+				conn->done();
+			}
+
+			void replicaThrottle(const string ns, int numShards, string primary[], bool throttle)
+			{
+				vector<shared_ptr<boost::thread> > throttleThreads;
+
+				for (int i = 0; i < numShards; i++)
+				{
+					printf("[MYCODE] MYCUSTOMPRINT: %s going to send throttle write command\n", primary[i].c_str());
+
+                    throttleThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleThrottle, this, primary[i], throttle))));
+                }
+
+				for (unsigned i = 0; i < throttleThreads.size(); i++) 
+					throttleThreads[i]->join();
+            }
+
+            void singleThrottle(string primary, bool throttle)
+            {
+				BSONObj info;
+                scoped_ptr<ScopedDbConnection> conn(
+                	ScopedDbConnection::getScopedDbConnection(
+                       	primary ) );
+
+				try
+				{
+					conn->get()->runCommand("admin", BSON("replSetWriteThrottle" << 1 << "throttle" << throttle), info);
 					string errmsg = conn->get()->getLastError();
 					cout << "[MYCODE] Replica Return:" << errmsg << endl;
 				}
