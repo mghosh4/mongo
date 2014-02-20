@@ -93,6 +93,7 @@ scratch
 /mongoperf
 /bsondump
 /readLatencyMeasure
+/measureLatency
 
 *.tgz
 *.zip
