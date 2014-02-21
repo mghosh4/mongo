@@ -668,6 +668,7 @@ namespace mongo {
             OpTime startTime;                                   //time from which oplog needs to be replayed        
             string primary;                               	    //the primary to connect to (for oplog details)
             int shardID;                                        //the id for this shard
+            bool replayAllOps;                                  //replay all the ops or not
             BSONObj proposedKey;                                //the proposed key
             BSONObj globalMin;                                  //global min
             BSONObj globalMax;                                  //global max
@@ -679,18 +680,18 @@ namespace mongo {
             //do some checks to see we have all the info we require
             //also extract the arguments in the same call
             if( !checkAndExtractArgs(oplogParams, errmsg,
-                                        ns, startTime, primary, shardID, numChunks, 
+                                        ns, startTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas)) {
                 success = false;
             } else {
 
-                printExtractedArgs(ns, startTime, primary, shardID, numChunks, 
+                printExtractedArgs(ns, startTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas);
 
                 //replay the oplog
-                success =  replayOplog(errmsg, ns, startTime, primary, shardID, numChunks, 
+                success =  replayOplog(errmsg, ns, startTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas);
             }
@@ -698,6 +699,7 @@ namespace mongo {
             if (success) {
                 printLogID();
                 cout<<"Replay succeeded !" << endl;
+                result.append("lastOpTime", startTime);
             } else {
                 printLogID();
                 cout<<"Replay failed! Error: " << errmsg << endl;
@@ -706,7 +708,7 @@ namespace mongo {
             return success;
         }
 
-        bool replayOplog(string& errmsg, string ns, OpTime startTime, string primary, int shardID, int numChunks,
+        bool replayOplog(string& errmsg, string ns, OpTime& startTime, string primary, int shardID, int numChunks, bool replayAllOps,
                                     BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax, 
                                     vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
 
@@ -720,20 +722,21 @@ namespace mongo {
             for(int i = 0; i < iterations; i++) {
                 printLogID();
                 cout<<"Executing iteration of replayOnce: " << i <<endl;
-                if( replayOnce(errmsg, done, prevlastOp, startTime, ns, primary, shardID, numChunks,
+                if( replayOnce(errmsg, done, prevlastOp, startTime, ns, primary, shardID, numChunks, replayAllOps,
                                     proposedKey, globalMin, globalMax,
-                                    splitPoints, assignments, removedReplicas) 
-                                && done) {
-                    //if replay once succeded and done is true, there were no more ops to replay
+                                    splitPoints, assignments, removedReplicas)) {
+                    if(done) { //if replay once succeded and done is true, there were no more ops to replay
+                        printLogID();
+                        cout<<"Done in iterations: " << i <<endl;
+                        break;
+                    } 
+                } else { //there was a problem with the replay
                     printLogID();
-                    cout<<"Done in iterations: " << i <<endl;
-                    return true;
+                    cout<<"There was a problem replaying the oplog in iteration : " << i <<endl;
+                    return false;
                 }
 
-                //printLogID();
-                //cout<<"Prev op in replayOplog: "<<prevlastOp.toString()<<endl;
-
-                //if not, startTime is automatically the new start time and the next iteration of replayOnce will receive it.
+                //if not done, startTime is automatically the new start time and the next iteration of replayOnce will receive it.
 
                 //check if there were any errors
                 if(errmsg != "" ) {
@@ -742,16 +745,22 @@ namespace mongo {
                 }
             }          
             
-            //no success after 10 iterations :(
-            errmsg="Replaying oplog (multiple attempts) did not succeed";
-            return false;
+            printLogID();
+            cout<<"Final op in replayOplog: " << prevlastOp.toString() << endl;
+
+
+            //startTime is the time of the last op that was replayed, this will be appended to the result in the function which called this
+            printLogID();
+            cout<<"Optime of the final op: " << startTime.toString() << endl;
+            
+            return true;
         }
 
         void printLogID() {
             cout<<"[MYCODE_HOLLA] ";
         }
 
-        void printExtractedArgs(string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks,
+        void printExtractedArgs(string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
                                     BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
                                     vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             printLogID();
@@ -764,6 +773,8 @@ namespace mongo {
             cout<<"Shard id is: "<<shardID<<endl;
             printLogID();
             cout<<"Num chunks: "<<numChunks<<endl;
+            printLogID();
+            cout<<"Get all ops: "<<replayAllOps<<endl;
             printLogID();
             cout<<"Proposed key: "<<proposedKey.toString()<<endl;
             printLogID();
@@ -791,7 +802,7 @@ namespace mongo {
         }
 
         bool checkAndExtractArgs(BSONObj oplogParams, string& errmsg,
-                                    string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, 
+                                    string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
                                     BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
                                     vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             //printLogID();
@@ -840,6 +851,9 @@ namespace mongo {
 
             //number of chunks
             numChunks = oplogParams["numChunks"].Int();
+
+            //get all ops or not
+            replayAllOps = oplogParams["replayAllOps"].Bool();
 
             //printLogID();
             //cout<<"numChunks done"<<endl;
@@ -905,18 +919,19 @@ namespace mongo {
             return true;
         }
 
-        bool replayOnce(string& errmsg, bool& done, BSONObj& prevlastOp, OpTime& startTime, string ns, string primary, int shardID, int numChunks,
+        bool replayOnce(string& errmsg, bool& done, BSONObj& prevlastOp, OpTime& startTime, string ns, string primary, 
+                                    int shardID, int numChunks, bool replayAllOps,
                                     BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax,
                                     vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
            
-            //printLogID();
-            //cout<<"====running replayOnce====="<<endl;
+            printLogID();
+            cout<<"====running replayOnce====="<<endl;
             bool success = false;           //the success variable
 
             //get all the ops that need to be replayed
             vector<BSONObj> opsToReplay;
             BSONObj lastOp = BSONObj();
-            success = getOpsToReplay(errmsg, lastOp, startTime, ns, primary, opsToReplay);
+            success = getOpsToReplay(errmsg, lastOp, startTime, ns, primary, opsToReplay, replayAllOps);
 
             if(success) {
                 printLogID();
@@ -940,43 +955,59 @@ namespace mongo {
             prevlastOp = lastOp.getOwned();
             //printLogID();
             //cout<<"Prev op after assignment in replayOnce: "<<prevlastOp.toString()<<endl;
+            printLogID();
+            cout<<"====replayOnce done====="<<endl;
             return success;
         }
 
-        bool getOpsToReplay(string& errmsg, BSONObj& lastOp, OpTime& startTime, string ns, string primary, vector<BSONObj>& opsToReplay) {
+        bool getOpsToReplay(string& errmsg, BSONObj& lastOp, OpTime& startTime, string ns, string primary, vector<BSONObj>& opsToReplay, bool replayAllOps) {
             BSONObj info;       //return info
             
+            int cap = 100;      //number of oplogs we will get to replay per round will be <= cap if 'replayAllOps' is not true
             printLogID();
             cout<<"==== Getting ops to replay===="<<endl;
             //TODO GOPAL: Can we connect one time and leave it?
             //connect to primary
-            oplogReader.connect(primary);
+            try {
 
-            if(oplogReader.haveCursor()) {
-                oplogReader.resetCursor();
-            }
+                oplogReader.connect(primary);
 
-            //make a query
-            oplogReader.tailingQueryGTE(rsoplog, startTime);
+                if(oplogReader.haveCursor()) {
+                    oplogReader.resetCursor();
+                }
 
-            //gather up the results
-            BSONObj queryResult;
-            while (oplogReader.more())
-            {
-                queryResult = oplogReader.next();
-                //set new starttime
-                startTime = queryResult["ts"]._opTime();
-                //printLogID();
-                //cout<<"Oplog operation:  " <<queryResult.toString()<<endl;
-                //add it to all ops
-                opsToReplay.push_back(queryResult);
-                //set it as last op
-                lastOp = queryResult.getOwned();
-            }
+                //make a query
+                oplogReader.tailingQueryGTE(rsoplog, startTime);
+
+                //gather up the results
+                BSONObj queryResult;
+                while (oplogReader.more())
+                {
+                    queryResult = oplogReader.next();
+                    //set new starttime
+                    startTime = queryResult["ts"]._opTime();
+                    //printLogID();
+                    //cout<<"Oplog operation " << opsToReplay.size() << " :  " <<queryResult.toString()<<endl;
+                    //add it to all ops
+                    opsToReplay.push_back(queryResult.copy());
+                    //set it as last op
+                    lastOp = queryResult.copy();
+
+                    //bail out if we reached the cap and 'replayAllOps' is not true
+                    if(!replayAllOps && (int)opsToReplay.size() >= cap) {
+                        break;
+                    }
+                    
+                }
             
-            //TODO GOPAL: Can we connect one time and leave it?
-            //snap this connection
-            oplogReader.resetConnection();
+                //TODO GOPAL: Can we connect one time and leave it?
+                //snap this connection
+                oplogReader.resetConnection();
+            } catch (DBException e) {
+                cout<<"Exception when getting ops. Exception is " << e.toString() << endl;
+            }
+            printLogID();
+            cout<<"==== Getting ops to replay done===="<<endl;
             return true;
         }
 
@@ -986,104 +1017,113 @@ namespace mongo {
             
             bool success = true;        //success variable
             
+            printLogID();
             cout<<"==== Replaying ops===="<<endl;
             //TODO GOPAL: Handle error conditions
             //iterate through each op, replaying it
             for (int i = 1; i < (int)opsToReplay.size(); i++) { //ignore very first one, thats already been executed
-                //get the op to replay
-                BSONObj opToReplay = opsToReplay[i];
+                try {
+                    //get the op to replay
+                    BSONObj opToReplay = opsToReplay[i];
 
-                printLogID();
-                cout<<"Currently replaying oplog entry: " <<opToReplay.toString()<<endl;
+                    //printLogID();
+                    //cout<<"Currently replaying oplog entry: " <<opToReplay.toString()<<endl;
 
-                //get the operation
-                string op;
-                if( opToReplay["op"].type() == mongo::String ){
-                    op = opToReplay["op"].String();  
-                } else {
-                    printLogID();
-                    cout<<"Did not get op of type string in operation! Op: " << opToReplay.toString() << endl;
-                    continue;
-                }
-                //printLogID();
-                //cout<<"op is: " <<op<<endl;
-                //do actions only if op is insert, update or delete
-                if( op == "i" || op == "u" || op == "d") { //TOASK GOPAL: Why? What are the other kind of operations?
-                    //get the namespace
-                    string ns;
-                    if( opToReplay["ns"].type() == mongo::String){
-                        ns = opToReplay["ns"].String();  
+                    //get the operation
+                    string op;
+                    if( opToReplay["op"].type() == mongo::String ){
+                        op = opToReplay["op"].String();  
                     } else {
                         printLogID();
-                        cout<<"Did not get ns of type string in operation! Op: " << opToReplay.toString() << endl;
+                        cout<<"Did not get op of type string in operation!" << endl;
                         continue;
                     }
                     //printLogID();
-                    //cout<<"ns is: " <<ns<<endl;
+                    //cout<<"op is: " <<op<<endl;
+                    //do actions only if op is insert, update or delete
+                    if( op == "i" || op == "u" /*|| op == "d"*/) { //TOASK GOPAL: Why? What are the other kind of operations?
+                        //get the namespace
+                        string ns;
+                        if( opToReplay["ns"].type() == mongo::String){
+                            ns = opToReplay["ns"].String();  
+                        } else {
+                            printLogID();
+                            cout<<"Did not get ns of type string in operation!" << endl;
+                            continue;
+                        }
+                        //printLogID();
+                        //cout<<"ns is: " <<ns<<endl;
 
-                    //get the 'o' field
-                    BSONObj o;
-                    if( opToReplay["o"].type() == Object){
-                        o = opToReplay["o"].Obj();  
-                    } else {
-                        printLogID();
-                        cout<<"Did not get o of type object in operation! Op: " << opToReplay.toString() << endl;
-                        continue;
-                    }
-
-                    //printLogID();
-                    //cout<<"o is: " <<o.toString()<<endl;
-
-                    //need to do processing only if it is the namespace we are interested in
-                    if(ns == nsOrig) {
-                        //get the value of the proposed key
-                        //TOCHECK GOPAL: How do you do this the right way?
-                        //1. do hasField
-                        //2. What do you do if does not?
-                        BSONObj value  = o.extractFields(proposedKey);
+                        //get the 'o' field
+                        BSONObj o;
+                        if( opToReplay["o"].type() == Object){
+                            o = opToReplay["o"].Obj();  
+                        } else {
+                            printLogID();
+                            cout<<"Did not get o of type object in operation!" << endl;
+                            continue;
+                        }
 
                         //printLogID();
-                        //cout << "Value string : " << value.toString() << endl;
+                        //cout<<"o is: " <<o.toString()<<endl;
 
-                        //attempt find which chunk this record will now go to
-                        int chunkIndex = getChunkIndex(value, globalMin, globalMax, splitPoints, numChunks);
+                        //need to do processing only if it is the namespace we are interested in
+                        if(ns == nsOrig) {
+                            //get the value of the proposed key
+                            //TOCHECK GOPAL: How do you do this the right way?
+                            //1. do hasField
+                            //2. What do you do if does not?
+                            BSONObj value  = o.extractFields(proposedKey);
 
-                        if (chunkIndex == -1) {
-                            printLogID();
-                            cout<<"Chunk index never assigned! Op: " << opToReplay.toString() << endl;
-                            errmsg = "Chunk index not assigned for op: " + opToReplay.toString();
-                            success = false;
-                        } else if (assignments[chunkIndex] >= (int)removedReplicas.size()) {
-                            printLogID();
-                            cout<<"No replica found for assignment! Op: " << opToReplay.toString() << endl;
-                            errmsg = "Replica to send to was not found for op ";
-                            errmsg += "(assignment according to chunk index out of range): "; 
-                            errmsg += opToReplay.toString();
-                            success = false;
-                        } else {
                             //printLogID();
-                            //cout << "Operation " << o.toString() << " going to shard " << removedReplicas[assignments[chunkIndex]] << endl;
-                            //TODO GOPAL: Optimize so that destMachine is not same as current machine. if it is, try local replay
-                            if( !replayOp(ns, removedReplicas[assignments[chunkIndex]], op, o, opToReplay)) {
+                            //cout << "Value string : " << value.toString() << endl;
+
+                            //attempt find which chunk this record will now go to
+                            int chunkIndex = getChunkIndex(value, globalMin, globalMax, splitPoints, numChunks);
+
+                            if (chunkIndex == -1) {
                                 printLogID();
-                                cout<<"Replay op error: "<<opToReplay.toString()<<endl;
+                                cout<<"Chunk index never assigned! Op: " << opToReplay.toString() << endl;
+                                errmsg = "Chunk index not assigned for op: " + opToReplay.toString();
                                 success = false;
-                                //TODO GOPAL: Handle error condition
-                            } else {
+                            } else if (assignments[chunkIndex] >= (int)removedReplicas.size()) {
                                 printLogID();
-                                cout<<"====replayOp done====="<<endl;
+                                cout<<"No replica found for assignment! Op: " << opToReplay.toString() << endl;
+                                errmsg = "Replica to send to was not found for op ";
+                                errmsg += "(assignment according to chunk index out of range): "; 
+                                errmsg += opToReplay.toString();
+                                success = false;
+                            } else {
+                                //printLogID();
+                                //cout << "Operation " << o.toString() << " going to shard " << removedReplicas[assignments[chunkIndex]] << endl;
+                                //TODO GOPAL: Optimize so that destMachine is not same as current machine. if it is, try local replay
+                                //printLogID();
+                                //cout<<"Oplog operation replay " << i << " :  " <<opToReplay.toString()<<endl;
+                                if( !replayOp(ns, removedReplicas[assignments[chunkIndex]], op, o, opToReplay)) {
+                                    printLogID();
+                                    cout<<"Replay op error: "<<opToReplay.toString()<<endl;
+                                    //TODO GOPAL: Handle error condition
+                                    continue;
+                                } 
                             }
+                  
+                        } else {
+                            //TODO GOPAL: replay a non resharded operation
+                            //obtain the object id
+                            //see which shard the chunk belongs to
+                            //replay on corresponding shard
                         }
-              
-                    } else {
-                        //TODO GOPAL: replay a non resharded operation
-                        //obtain the object id
-                        //see which shard the chunk belongs to
-                        //replay on corresponding shard
-                    }
-                    
+                    }    
+                } catch (DBException e) {
+                    cout<<"Exception when replaying op. Exception is " << e.toString() << endl;
+                    continue;
                 }
             }    
+
+          
+            printLogID();
+            cout<<"====replayOps done====="<<endl;
+                      
             return success;
         }
 
@@ -1112,8 +1152,6 @@ namespace mongo {
         }
 
         bool replayOp(string ns, string destMachine, string op, BSONObj o, BSONObj opToReplay) {
-            printLogID();
-            cout<<"====running replayOp====="<<endl;
             bool success = true;
             //make the connection
             scoped_ptr<ScopedDbConnection> conn(
@@ -1143,12 +1181,12 @@ namespace mongo {
                     if( opToReplay["o2"].type() == Object) {
                         query = opToReplay["o2"].Obj();
                     } else {
-                        cout<<"o2 field not object ! Op: "<<opToReplay.toString() << endl;
+                        cout<<"o2 field not object !"<< endl;
                         return false;
                     }
                     //printLogID();
                     //cout<<"o2 is: " <<query.toString()<<endl;
-                    bool upsert = opToReplay["b"].eoo() ? false : opToReplay["b"].Bool();
+                    bool upsert = opToReplay["b"].eoo() ? false : opToReplay["b"].booleanSafe();
                     //TODO GOPAL: see if this needs to be casted as query. Seems to work even without a cast.. for now
                     conn->get()->update(ns, query, o, upsert);
                     
@@ -1158,7 +1196,7 @@ namespace mongo {
                         cout<<"Update ErrMsg: " << errmsg << " Op: " << opToReplay.toString() << endl;
                     }       
                 } else if (op == "d") {
-                    bool justOne = opToReplay["b"].eoo()? false : opToReplay["b"].Bool();
+                    bool justOne = opToReplay["b"].eoo()? false : opToReplay["b"].booleanSafe();
                     conn->get()->remove(ns, o, justOne);
                     
                     
@@ -1175,7 +1213,9 @@ namespace mongo {
                     success = false;
                 }
             } catch (DBException e) {
-                cout<<"Exception when playing op " << opToReplay.toString() << ". Exception is " << e.toString() << endl;
+                cout<<"Exception when replaying op. Exception is " << e.toString() << endl;
+                conn->done();
+                return false;
             }
 
             //int endCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);

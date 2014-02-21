@@ -1223,7 +1223,7 @@ namespace mongo {
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTS, 
                             numChunk, assignment, 
-                            errmsg);
+                            errmsg, false);
 
 				// 3. Replica return as primary
 				log() << "[MYCODE_TIME] Replica Return" << endl;
@@ -1243,7 +1243,7 @@ namespace mongo {
             bool replayOplog(const string ns, BSONObj proposedKey, BSONObjSet splitPoints,  
                                 int numShards, string primary[], string removedReplicas[], OpTime startTS[],
                                 int numChunks,  int assignments[], 
-                                string& errmsg) {
+                                string& errmsg, bool replayAllOps) {
                 //success variable
                 bool success = true;
 
@@ -1284,6 +1284,7 @@ namespace mongo {
                     params.append("splitPoints", points);                               //split points
                     params.append("assignments", assignmentsVector);                    //the new assignments for chunks
                     params.append("removedReplicas", removedReplicasVector);            //the other removed replicas
+                    params.append("replayAllOps", replayAllOps);                        //replay all ops or not (if false, caps ops to replay which might or might not cover all ops)
 
                     //create an object to encapsulate all the params
                     BSONObj oplogParams = params.obj();                 
@@ -1322,19 +1323,19 @@ namespace mongo {
                         cout<<"[MYCODE_HOLLA] Making a connection to "<< replica <<endl;
                         
                         if( !conn->get()->runCommand("admin", BSON("replayOplog" << oplogParams), info)) {
-                            cout<<"[MYCODE_HOLLA] Replay Command failed"<<endl;
+                            cout<<"[MYCODE_HOLLA] Replay Command failed at " << replica << endl;
                             string errmsg = conn->get()->getLastError();
                             cout<<"[MYCODE_HOLLA] ErrMsg: "<<errmsg<<endl;
                             //TODO GOPAL: What do you do if this happens? Retry/Fail?
                         } else {
                             //TODO GOPAL: Do we want anything from info?
-                            cout<<"[MYCODE_HOLLA] Replay Info has: "<<info.toString()<<endl;
+                            cout<<"[MYCODE_HOLLA] Replay Info from " << replica << " has: "<<info.toString()<<endl;
                         }
                     }
                     catch(DBException e){
                         //oops something went wrong
                         //TODO GOPAL: What do you do if this happens? Retry/Fail?
-                        cout << "[MYCODE_HOLLA] replayOplog" << " threw exception: " << e.toString() << endl;
+                        cout << "[MYCODE_HOLLA] replayOplog connecting to " << replica << " threw exception: " << e.toString() << endl;
                         done = false;
                         trials++;
                     }
