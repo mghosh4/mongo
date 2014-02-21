@@ -73,6 +73,7 @@
 "replSetRemove",
 "replSetAdd",
 "replSetLeader",
+"replSetWriteThrottle",
 "replGetIdentifier",
 "replSetStepDown",
 "replSetSyncFrom",

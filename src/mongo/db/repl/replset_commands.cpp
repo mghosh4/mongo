@@ -21,6 +21,7 @@
 #include "mongo/db/auth/action_set.h"
 #include "mongo/db/auth/action_type.h"
 #include "mongo/db/auth/authorization_manager.h"
+#include "mongo/db/instance.h"
 #include "mongo/db/oplogreader.h"
 #include "mongo/db/repl/rs_optime.h"
 #include "../cmdline.h"
@@ -346,6 +347,38 @@ namespace mongo {
             return true;
         }
     } cmdReplSetLeader;
+
+    class CmdReplSetWriteThrottle : public ReplSetCommand {
+    public:
+        CmdReplSetWriteThrottle() : ReplSetCommand("replSetWriteThrottle") { }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::replSetWriteThrottle);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
+			cout << "[MYCODE] Replica Set Write Throttle Command called" << endl;
+            if( !check(errmsg, result) )
+                return false;
+
+			bool throttle = cmdObj["throttle"].Bool();
+			const char *rsSettingNS = "local.settings";
+			DBDirectClient cli;
+
+			try
+			{
+				cli.update( rsSettingNS, BSON( "_id" << "throttle" ), BSON( "$set" << BSON( "stopped" << throttle )), true );
+			}
+			catch (DBException e)
+			{
+				cout << "[MYCODE] Throttling write failed" << e.what() << endl;
+			}
+
+            return true;
+        }
+    } cmdReplSetWriteThrottle;
 
     class CmdReplSetRemove : public ReplSetCommand {
     public:

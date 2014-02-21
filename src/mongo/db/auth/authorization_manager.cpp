@@ -196,6 +196,7 @@ namespace {
         clusterAdminRoleWriteActions.addAction(ActionType::replSetAdd);
         clusterAdminRoleWriteActions.addAction(ActionType::replayOplog);
         clusterAdminRoleWriteActions.addAction(ActionType::replSetLeader);
+        clusterAdminRoleWriteActions.addAction(ActionType::replSetWriteThrottle);
         clusterAdminRoleWriteActions.addAction(ActionType::replGetIdentifier);
         clusterAdminRoleWriteActions.addAction(ActionType::resync);
         clusterAdminRoleWriteActions.addAction(ActionType::shardCollection);
