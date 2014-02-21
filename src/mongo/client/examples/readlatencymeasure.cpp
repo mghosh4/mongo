@@ -16,6 +16,8 @@
  */
 
 #include <iostream>
+#include <cstdlib>
+#include <ctime>
 #include "mongo/client/dbclient.h"
 #include "mongo/util/time_support.h"
 
@@ -45,28 +47,44 @@ struct timeval subtract(struct timeval start_time, struct timeval stop_time) {
 	return delay;
 }
 
-void run(string ns) {
+void run(string ns, long long range) {
     DBClientConnection c;
     c.connect("localhost"); //"192.168.58.1");
-    cout << "connected ok" << endl;
+    //cout << "connected ok" << endl;
 	struct timeval start_time, stop_time, delay;
 	char timeStr[25];
+    bool flag;
+    BSONObj b;
+    srand(time(NULL));
+    long long user_id;
 
     while( true ) {
+        flag = false;
 		curTimeString(timeStr);
 		gettimeofday(&start_time, NULL);
 		try {
-			BSONObj b = c.findOne(ns, Query(), 0, QueryOption_SlaveOk);
+            user_id = rand() % range;
+		    b = c.findOne(ns, Query(BSON("user_id" << user_id)), 0, QueryOption_SlaveOk);
 		}
 		catch (DBException e){
+            flag = true;
 			cout << "Error:" << e.toString() << endl;
 		}
 
-		gettimeofday(&stop_time, NULL);
-		//cout << "Returned result:" << b.toString();
+        if (!flag)
+        {
+		    gettimeofday(&stop_time, NULL);
+		    cout << "Returned result:" << b.toString() << endl;
 
-		delay = subtract(start_time, stop_time);
-		cout << timeStr << " " << delay.tv_sec*1000 + delay.tv_usec/(double)1000 << endl;
+		    delay = subtract(start_time, stop_time);
+		    cout << timeStr << " " << delay.tv_sec*1000 + delay.tv_usec/(double)1000 << endl;
+        }
+        else
+        {
+            cout << "Returned result: FAILED" << endl;
+		    cout << timeStr << " " << INT_MAX << endl;
+        }
+
 		usleep(100000);
     }
 }
@@ -80,7 +98,7 @@ int main(int argc, char* argv[]) {
 	}
 
     try {
-        run(argv[1]);
+        run(argv[1], atol(argv[2]));
     }
     catch( DBException &e ) {
         cout << "caught " << e.what() << endl;

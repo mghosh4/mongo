@@ -1621,7 +1621,7 @@ namespace mongo {
 					while (cursor->more()) {
 						count++;
 						o = cursor->next().getOwned();
-						log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+						//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
         				{
             				PageFaultRetryableSection pgrs;
 	        	    		while ( 1 ) {

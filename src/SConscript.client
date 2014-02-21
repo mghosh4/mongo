@@ -107,7 +107,8 @@ exampleSourceMap = [
         ('tutorial', 'mongo/client/examples/tutorial.cpp'),
         ('whereExample', 'mongo/client/examples/whereExample.cpp'),
         ('readLatencyMeasure', 'mongo/client/examples/readlatencymeasure.cpp'),
-        ]
+        ('measureLatency', 'mongo/client/examples/measureLatency.cpp'),
+	]
 
 clientHeaderDirectories = [
     "base/",

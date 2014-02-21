@@ -39,6 +39,8 @@
 *.psess
 *#
 .#*
+*.sublime-project
+*.sublime-workspace
 
 /src/mongo/*/*Debug*/
 /src/mongo/*/*/*Debug*/
@@ -91,6 +93,7 @@ scratch
 /mongoperf
 /bsondump
 /readLatencyMeasure
+/measureLatency
 
 *.tgz
 *.zip
@@ -137,6 +140,7 @@ debian/mongodb
 *.files
 *.includes
 *.orig
+*.nfs*
 
 #built by Visual Studio
 src/mongo/base/error_codes.cpp
