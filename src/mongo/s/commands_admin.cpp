@@ -1208,10 +1208,13 @@ namespace mongo {
 				log() << "[MYCODE_TIME] Migrating Chunk" << endl;
 				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
 
-                // 2. Oplog Replay
-                log() << "[MYCODE_TIME] Replaying Oplog" << endl;
+                //conversion from array to vector
+                vector<OpTime> currTSVector(currTS, currTS + numShards);
+                
+                // 2. Oplog Replay once
+                log() << "[MYCODE_TIME] Replaying Oplog once" << endl;
                 replayOplog(ns, proposedKey, splitPoints, 
-                            numShards, primary, removedReplicas, currTS, 
+                            numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
                             errmsg, false);
 
@@ -1219,18 +1222,25 @@ namespace mongo {
 				log() << "[MYCODE_TIME] Throttling Writes" << endl;
 				replicaThrottle(ns, numShards, primary, true);
 
+                // 4. Oplog Replay again
+                log() << "[MYCODE_TIME] Replaying Oplog again" << endl;
+                replayOplog(ns, proposedKey, splitPoints, 
+                            numShards, primary, removedReplicas, currTSVector, 
+                            numChunk, assignment, 
+                            errmsg, true);
+
 				if (configUpdate)
 				{
-					// 4. Update Config DB
+					// 5. Update Config DB
 					log() << "[MYCODE_TIME] Update Config" << endl;
 					updateConfig(ns, proposedKey, splitPoints, numChunk, assignment);
 				}
 
-				// 3. Replica return as primary
+				// 6. Replica return as primary
 				log() << "[MYCODE_TIME] Replica Return" << endl;
 				replicaReturn(ns, numShards, removedReplicas, primary, hostIDMap, configUpdate);
 
-				// 3. Write UnThrottle
+				// 7. Write UnThrottle
 				log() << "[MYCODE_TIME] UnThrottling Writes" << endl;
 				replicaThrottle(ns, numShards, primary, false);
 
@@ -1238,7 +1248,7 @@ namespace mongo {
             }
 
             bool replayOplog(const string ns, BSONObj proposedKey, BSONObjSet splitPoints,  
-                                int numShards, string primary[], string removedReplicas[], OpTime startTS[],
+                                int numShards, string primary[], string removedReplicas[], vector<OpTime>& startTS,
                                 int numChunks,  int assignments[], 
                                 string& errmsg, bool replayAllOps) {
                 //success variable
@@ -1290,7 +1300,7 @@ namespace mongo {
                     //create threads and push threads into thread tracker
                     replayOplogThreads.push_back(shared_ptr<boost::thread>(
                                     new boost::thread (boost::bind(&ReShardCollectionCmd::delegateReplay, 
-                                        this, removedReplicas[i], oplogParams))));                    
+                                        this, removedReplicas[i], oplogParams, &startTS[i]))));                    
                 }
 
                 for (unsigned i = 0; i < replayOplogThreads.size(); i++) {
@@ -1302,7 +1312,7 @@ namespace mongo {
 
             }
 
-            void delegateReplay(string replica, BSONObj oplogParams) {
+            void delegateReplay(string replica, BSONObj oplogParams, OpTime *startTS) {
                 BSONObj info;
 
                 //make a connection to the required replica
@@ -1327,6 +1337,7 @@ namespace mongo {
                         } else {
                             //TODO GOPAL: Do we want anything from info?
                             cout<<"[MYCODE_HOLLA] Replay Info from " << replica << " has: "<<info.toString()<<endl;
+                            *startTS = info["lastOpTime"]._opTime();
                         }
                     }
                     catch(DBException e){
