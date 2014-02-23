@@ -1517,12 +1517,19 @@ namespace mongo {
             out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
         }
 
+
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // 1.
+            log()<<"[WWT] Move Data Starts"<<endl;
             const string ns = cmdObj.firstElement().str();
-			const string key = cmdObj["key"].str();
+            BSONObj proposedKey = cmdObj["proposedKey"].Obj();
+            const char *key_char = proposedKey.firstElement().fieldName();
+            const string key = string(key_char);
+            //const string key = cmdObj["key"].str();
             string to = cmdObj["to"].str();
             string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
+            string fromReplicaSet = cmdObj["rs"].str();
+            
 			log() << "[MYCODE] INSIDE THE CODE" << rsLog;
 
             while(!theReplSet->state().shunned())
@@ -1596,7 +1603,49 @@ namespace mongo {
                 shardingState.enable( configdb );
                 configServer.init( configdb );
             }
+             //Split range into sub-ranges
+             BSONObj min = cmdObj.getObjectField( "min" );
+             BSONObj max = cmdObj.getObjectField( "max" );
+             int subChunk = 10;
+             scoped_ptr<ScopedDbConnection> conn(
+                            ScopedDbConnection::getInternalScopedDbConnection(fromReplicaSet));
+             BSONObj splitResult;
+             BSONObjBuilder cmd;
+             cmd.append( "splitVector" , ns );//TO-DO make sure this is the right ns
+             cmd.append( "keyPattern" , proposedKey );
+             cmd.append( "min" , min );
+             cmd.append( "max" , max );
+             cmd.append( "range", range);
+             cmd.append( "maxChunkSizeBytes" , maxSizeElem.Int() );
+             cmd.append( "maxSplitPoints" , subChunk-1 );
+             //cmd.append( "maxChunkObjects" , maxObjs ); don't need this, in SplitVector deal with this
+             cmd.appendBool( "subSplit" , true);
+             BSONObj splitCmdObj = cmd.obj();
+        
+             if ( ! conn->get()->runCommand( "admin" , splitCmdObj , splitResult )) {
+                  conn->done();
+                  log() << "[WWT] Pick split Vector cmd failed\n";
+                  return false;
+             }
+        
+             log() << "[WWT] Pick split Vector cmd done\n";
 
+
+             BSONObjIterator it( splitResult.getObjectField( "splitKeys" ) );
+             BSONObj prev;
+             for(int j=0;j<subChunk;j++){
+                  BSONObj current = it.next().Obj().getOwned();
+                  log() << "[WWT] split point = " << current.toString() <<endl;
+                  BSONObj local_min = j > 0 ? prev : min;
+		  BSONObj local_max = j == subChunk - 1 ? max : current;
+                  log() << "[WWT] min = " << local_min.toString() <<" max = " << local_max.toString() <<endl;
+                  BSONObj range = getRangeAsBSON(key_char, local_min, local_max);
+                  log() << "[WWT] subRange:" << range.toString() << endl;
+             
+		  prev = current;
+                  it++;
+             }
+             conn->done();
             //MoveTimingHelper timing( "from" , ns , min , max , 6 /* steps */ , errmsg );
 
             // Make sure we're as up-to-date as possible with shard information
@@ -1621,7 +1670,7 @@ namespace mongo {
 					while (cursor->more()) {
 						count++;
 						o = cursor->next().getOwned();
-						//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+						log() << "[MYCODE] DATA: " << o.toString() << rsLog;
         				{
             				PageFaultRetryableSection pgrs;
 	        	    		while ( 1 ) {
@@ -1677,6 +1726,28 @@ namespace mongo {
 			return true;
 		}
 
+            BSONObj getRangeAsBSON(const char* key, BSONObj min, BSONObj max)
+            {
+                BSONElement minElem = min[key];
+                BSONElement maxElem = max[key];
+
+                BSONObjBuilder b;
+                BSONObjBuilder sub(b.subobjStart(key));
+                if (minElem.type() == MinKey)
+                    sub.appendAs(maxElem, "$lt");
+                else if (maxElem.type() == MaxKey)
+                    sub.appendAs(minElem, "$gte");
+                else
+                {
+                    sub.appendAs(minElem, "$gte");
+                    sub.appendAs(maxElem, "$lt");
+                }
+
+                BSONObj subObj = sub.done();
+                BSONObj range = b.done().getOwned();
+                return range;
+            }
+            
 	}moveDataCmd;
 
     bool ShardingState::inCriticalMigrateSection() {

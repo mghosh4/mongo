@@ -213,13 +213,19 @@ namespace mongo {
             // 1.a We'll parse the parameters in two steps. First, make sure the we can use the split index to get
             //     a good approximation of the size of the chunk -- without needing to access the actual data.
             //
-
+	    BSONElement reShardElem1 = jsobj[ "reShard" ];
+            log()<< "[WWT] reShard = " << reShardElem1.ok()<<endl;
+            //log()<< "[WWT] reShard = " << reShardElem1.Bool()<<endl;
+            BSONElement subSplitElem = jsobj[ "subSplit" ];
+	    log()<< "[WWT] subSplit = " << subSplitElem.ok()<<endl;
+            //log()<< "[WWT] subSplit = " << subSplitElem.Bool()<<endl;
             cout << "[MYCODE] SplitVector Checkpoint 1\n";
             const char* ns = jsobj.getStringField( "splitVector" );
             BSONObj keyPattern = jsobj.getObjectField( "keyPattern" );
 
             if ( keyPattern.isEmpty() ) {
                 errmsg = "no key pattern found in splitVector";
+                log()<<"no key pattern found in splitVector"<<endl;
                 return false;
             }
 
@@ -228,6 +234,7 @@ namespace mongo {
             BSONObj max = jsobj.getObjectField( "max" );
             if ( min.isEmpty() != max.isEmpty() ){
                 errmsg = "either provide both min and max or leave both empty";
+                log()<<"either provide both min and max or leave both empty"<<endl;
                 return false;
             }
 
@@ -316,8 +323,10 @@ namespace mongo {
                 
                 // If there's not enough data for more than one chunk, no point continuing.
                 cout << "[MYCODE] SplitVector Checkpoint 3\t recCount:" << recCount << "\tdataSize:" << dataSize << "\tmaxChunkSize:" << maxChunkSize << endl;
+		
+
                 BSONElement reShardElem = jsobj[ "reShard" ];
-                if ( (!reShardElem.ok() &&  dataSize < maxChunkSize) || recCount == 0 ) {
+                if ( (!reShardElem.ok() && !subSplitElem.ok() &&  dataSize < maxChunkSize) || recCount == 0 ) {
                     vector<BSONObj> emptyVector;
                     result.append( "splitKeys" , emptyVector );
                     return true;
@@ -335,7 +344,23 @@ namespace mongo {
                     keyCount = maxChunkObjects;
                 }
                 cout << "[MYCODE] Avg Record Size:" << avgRecSize << "\tKey Count:" << keyCount << endl;
-                
+
+                if(subSplitElem.ok()){
+                    log() << "[MYCODE] SplitVector Checkpoint 6" << endl;
+                    
+                    BSONObj range = jsobj.getObjectField( "range" );
+                    log() << "[WWT CODE] Range:" << range.toString() << endl;
+                   
+                    scoped_ptr<DBDirectClient> direct;
+                    DBClientBase * conn;
+                    direct.reset( new DBDirectClient() );
+                    conn = direct.get();
+                    BSONObj qRange = range.getOwned();
+                    long long count=conn->count(ns,qRange);
+                    keyCount = count / maxSplitPoints;
+                    log() << "[WWT Split] keyCount = "<< keyCount << "with count "<<count <<"/ maxSplitPoints "<<maxSplitPoints<<endl;
+                }
+
                 //
                 // 2. Traverse the index and add the keyCount-th key to the result vector. If that key
                 //    appeared in the vector before, we omit it. The invariant here is that all the

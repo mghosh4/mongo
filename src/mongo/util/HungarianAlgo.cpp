@@ -4,7 +4,6 @@
 #include <cmath>
 #include <climits>
 #include <string.h>
-#define DEBUG
 void HungarianAlgo::max_cost_assignment(long long ** datainkr, int numRow, int numColumn,int assignment[])
 {
 
