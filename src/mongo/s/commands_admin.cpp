@@ -1659,7 +1659,7 @@ namespace mongo {
 				for (int i = 0; i < numShards; i++)
 					cout << "[MYCODE] Shard Info: " << newShards[i].toString() << endl;
 
-				string newRemovedReplicas[numShards];
+				/*string newRemovedReplicas[numShards];
 				for (int i = 0; i < numShards; i++)
 				{
 					for (int j = 0; j < numShards; j++)
@@ -1669,7 +1669,7 @@ namespace mongo {
 							newRemovedReplicas[i] = removedReplicas[j];
 						}
 					}
-				}
+				}*/
 
 				vector<shared_ptr<boost::thread> > migrateThreads;
 
@@ -1693,7 +1693,7 @@ namespace mongo {
 						{
 							scoped_ptr<ScopedDbConnection> fromconn(
                 				ScopedDbConnection::getScopedDbConnection(
-                        			newRemovedReplicas[j] ) );
+                        			removedReplicas[j] ) );
 
 							while (true)
 							{
@@ -1713,7 +1713,7 @@ namespace mongo {
 							if (sourceCount > 0)
 							{
 								migrateThreads.push_back(shared_ptr<boost::thread>(
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, newRemovedReplicas, range, key, min, i, j, assignment, ns))));
+									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, range, key, min, i, j, assignment, ns))));
 							}
 						}
 					}
@@ -1738,7 +1738,7 @@ namespace mongo {
 					for (int j = 0; j < numShards; j++)
 						datainkr[i][j] = 0;
 
-                collectData(splitPoints, ns, newRemovedReplicas, numChunk, numShards, proposedKey, datainkr);
+                collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
 
                 delete[] datainkr;
 			}
