@@ -68,6 +68,7 @@ namespace mongo {
     inline void opread(Message& m) { if( _diaglog.getLevel() & 2 ) _diaglog.readop((char *) m.singleData(), m.header()->len); }
     inline void opwrite(Message& m) { if( _diaglog.getLevel() & 1 ) _diaglog.writeop((char *) m.singleData(), m.header()->len); }
 
+    bool isWriteThrottled();
     void receivedKillCursors(Message& m);
     void receivedUpdate(Message& m, CurOp& op);
     void receivedDelete(Message& m, CurOp& op);
@@ -347,33 +348,6 @@ namespace mongo {
         bool isCommand = false;
         const char *ns = m.singleData()->_data + 4;
 
-        BSONObjBuilder b;
-        const string rsSettingNS = "local.settings";
-        DBDirectClient cli;
-        BSONObj throttleObj;
-        if (cli.exists(rsSettingNS))
-        {
-            try
-            {
-                throttleObj = cli.findOne(rsSettingNS, BSON( "_id" << "throttle" ));
-            }
-            catch (DBException e)
-            {
-                log() << "[MYCODE] findOne call failed for " << rsSettingNS << endl;
-            }
-
-            if (throttleObj["stopped"].eoo())
-            {
-                bool stopped = throttleObj["stopped"].Bool();
-                if (stopped && opIsWrite(op))
-                {
-                    b.append("err", "write throttled");
-                    replyToQuery(0, m, dbresponse, b.obj());
-                    return;
-                }
-            }
-        }
-
         if ( op == dbQuery ) {
             if( strstr(ns, ".$cmd") ) {
                 isCommand = true;
@@ -471,12 +445,36 @@ namespace mongo {
                     uassert( 16257, str::stream() << "Invalid ns [" << ns << "]", false );
                 }
                 else if ( op == dbInsert ) {
+                    if (isWriteThrottled())
+                    {
+                        BSONObjBuilder b;
+                        log() << "[MYCODE] Write Op Throttled" << endl;
+                        b.append("err", "write throttled");
+                        replyToQuery(0, m, dbresponse, b.obj());
+                        return;
+                    }
                     receivedInsert(m, currentOp);
                 }
                 else if ( op == dbUpdate ) {
+                    if (isWriteThrottled())
+                    {
+                        BSONObjBuilder b;
+                        log() << "[MYCODE] Write Op Throttled" << endl;
+                        b.append("err", "write throttled");
+                        replyToQuery(0, m, dbresponse, b.obj());
+                        return;
+                    }
                     receivedUpdate(m, currentOp);
                 }
                 else if ( op == dbDelete ) {
+                    if (isWriteThrottled())
+                    {
+                        BSONObjBuilder b;
+                        log() << "[MYCODE] Write Op Throttled" << endl;
+                        b.append("err", "write throttled");
+                        replyToQuery(0, m, dbresponse, b.obj());
+                        return;
+                    }
                     receivedDelete(m, currentOp);
                 }
                 else {
@@ -523,6 +521,42 @@ namespace mongo {
         debug.recordStats();
         debug.reset();
     } /* assembleResponse() */
+
+    bool isWriteThrottled()
+    {
+        const string rsSettingNS = "local.settings";
+        DBDirectClient cli;
+        BSONObj throttleObj;
+        if (cli.exists(rsSettingNS))
+        {
+            log() << "[MYCODE] Checking for throttle value" << endl;
+            try
+            {
+                throttleObj = cli.findOne(rsSettingNS, Query());
+            }
+            catch (DBException e)
+            {
+                log() << "[MYCODE] dbexception: findOne call failed for " << rsSettingNS << endl;
+            }
+            catch (std::exception &e)
+            {
+                log() << "[MYCODE] exception: findOne call failed for " << rsSettingNS << endl;  
+            }
+
+            log() << "[MYCODE] Throttle value: " << throttleObj.toString() << endl;
+            if (!throttleObj["stopped"].eoo())
+            {
+                log() << "[MYCODE] Checking for stopped value" << endl;
+                bool stopped = throttleObj["stopped"].Bool();
+                if (stopped)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     void receivedKillCursors(Message& m) {
         int *x = (int *) m.singleData()->_data;

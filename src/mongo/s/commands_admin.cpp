@@ -1305,6 +1305,7 @@ namespace mongo {
 
                 for (unsigned i = 0; i < replayOplogThreads.size(); i++) {
                     replayOplogThreads[i]->join();
+                    cout << "Oplog for " << removedReplicas[i] << " needs to be replayed from " << startTS[i].toString() << endl;
                     //TODO GOPAL: find a way of returning these errors
                 }
 
@@ -1337,7 +1338,9 @@ namespace mongo {
                         } else {
                             //TODO GOPAL: Do we want anything from info?
                             cout<<"[MYCODE_HOLLA] Replay Info from " << replica << " has: "<<info.toString()<<endl;
-                            *startTS = info["lastOpTime"]._opTime();
+                            if(!info["lastOpTime"].eoo()) {
+                                *startTS = info["lastOpTime"]._opTime();
+                            }
                         }
                     }
                     catch(DBException e){
