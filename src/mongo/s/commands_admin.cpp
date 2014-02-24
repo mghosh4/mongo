@@ -1080,7 +1080,8 @@ namespace mongo {
 				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment);
 				if (!success)
 				{
-					conn1->done();
+					delete[] replicaSets;
+                    setBalancerState(true);
 					return false;
 				}
 
@@ -1392,6 +1393,35 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 
 					conn->done();
 				}
+			}
+
+                        void collectIDs(vector<Shard> newShards, int numShards, map<string, int>& hostIDMap)
+			{
+				BSONObj info;
+				int hostNum;
+				for (int i = 0; i < numShards; i++)
+				{
+					hostNum = 0;
+					printf("[MYCODE] MYCUSTOMPRINT: %s\n", newShards[i].getConnString().c_str());
+                	scoped_ptr<ScopedDbConnection> conn(
+                		ScopedDbConnection::getScopedDbConnection(
+                        	newShards[i].getConnString() ) );
+
+					conn->get()->runCommand("admin", BSON("getIdentifier" << 1), info);
+					vector<BSONElement> hosts = info["hosts"].Array();
+					vector<BSONElement> ids = info["id"].Array();
+					vector<BSONElement>::iterator dit = ids.begin();
+					for (vector<BSONElement>::iterator hit = hosts.begin(); hit != hosts.end(); hit++,dit++)
+					{
+						string host = (*hit).String();
+						int id = (*dit).Int();
+						cout << "[MYCODE] Host:" << host << " ID:" << id << endl;
+						hostIDMap.insert(pair<string, int>(host, id));
+					}
+
+					conn->done();
+				}
+				cout << "[MYCODE] hostIDMap size: " << hostIDMap.size() << endl;
 			}
 
                   	void checkTimestamp(string shards[], int numShards, OpTime startTS[])
@@ -1745,7 +1775,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 							{
 								migrateThreads.push_back(shared_ptr<boost::thread>(
 
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, newRemovedReplicas, proposedKey, min, max,  i, j, assignment, ns))));
+									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, min, max,  i, j, assignment, ns))));
 							}
 						}
 					}
@@ -1946,6 +1976,8 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 				cout << "[MYCODE] hostIDMap size:" << hostIDMap.size() << endl;
 
 				int hostID = -1;
+                                vector<shared_ptr<boost::thread> > returnThreads;
+
 				for (int i = 0; i < numShards; i++)
 				{
 					printf("[MYCODE] MYCUSTOMPRINT: %s going to add %s\n", primary[i].c_str(), removedReplicas[i].c_str());
