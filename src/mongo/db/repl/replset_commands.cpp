@@ -376,6 +376,8 @@ namespace mongo {
 				cout << "[MYCODE] Throttling write failed" << e.what() << endl;
 			}
 
+			cout << "[MYCODE] Replica Set Write Throttle Command succeeded" << endl;
+
             return true;
         }
     } cmdReplSetWriteThrottle;
