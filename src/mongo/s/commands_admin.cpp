@@ -1715,6 +1715,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 			{
                 vector<Shard> newShards;
                 Shard primary = grid.getDBConfig(ns)->getPrimary();
+                log()<<"WWT migrate Chunk primary connString:"<<primary.getConnString()<<endl;
                 primary.getAllShards( newShards );
                 int numShards = newShards.size();
 				for (int i = 0; i < numShards; i++)
@@ -1809,7 +1810,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 			{
                 vector<Shard> newShards;
                 Shard newprimary = grid.getDBConfig(ns)->getPrimary();
-                newprimary.getAllShards( newShards );
+                string rs = newprimary.getConnString();
                 const char *key = proposedKey.firstElement().fieldName();
 				BSONObj res;
                 BSONObj range = getRangeAsBSON(key, min, max);
@@ -1859,7 +1860,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 BSONObj minID = b.done();
 		cout << "[WWT]single Migrate from = " <<removedreplicas[j]<<endl;
 		cout << "[WWT]single Migrate to = " <<removedreplicas[assignment[i]]<<endl;
-		cout << "[WWT]single Migrate rs = " <<newShards[j].getConnString()<<endl;
+		cout << "[WWT]single Migrate rs = " <<rs<<endl;
 				try
 				{
 					toconn->get()->runCommand( "admin" , 
@@ -1868,7 +1869,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
       							"from" << removedreplicas[j] << 
       							"to" << removedreplicas[assignment[i]] << 
       							/////////////////////////////// 
-                                                        "rs"<<newShards[j].getConnString()<<
+                                                        "rs"<<rs<<
       							"range" << range << 
 							"min"<<min<<
                                                         "max"<<max<<
