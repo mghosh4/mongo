@@ -23,6 +23,8 @@
 #include "mongo/db/auth/authorization_manager.h"
 #include "mongo/db/instance.h"
 #include "mongo/db/oplogreader.h"
+#include "mongo/db/pagefault.h"
+#include "mongo/db/ops/update.h"
 #include "mongo/db/repl/rs_optime.h"
 #include "../cmdline.h"
 #include "../commands.h"
@@ -365,17 +367,24 @@ namespace mongo {
 
 			bool throttle = cmdObj["throttle"].Bool();
 			const char *rsSettingNS = "local.settings";
-			DBDirectClient cli;
+            OpDebug debug;
 
-			try
-			{
-				cli.update( rsSettingNS, BSON( "_id" << "throttle" ), BSON( "$set" << BSON( "stopped" << throttle )), true );
-			}
-			catch (DBException e)
-			{
-				cout << "[MYCODE] Throttling write failed" << e.what() << endl;
-			}
-
+            PageFaultRetryableSection s; 
+            while ( 1 ) { 
+                try { 
+                    Lock::DBWrite lk(rsSettingNS); 
+                     
+                    Client::Context ctx( rsSettingNS ); 
+                     
+                    UpdateResult res = updateObjects(rsSettingNS, BSON( "$set" << BSON( "stopped" << throttle )), BSON( "_id" << "throttle" ), true, false, false, debug ); 
+                    lastError.getSafe()->recordUpdate( res.existing , res.num , res.upserted ); // for getlasterror 
+                    break; 
+                } 
+                catch ( PageFaultException& e ) { 
+                    e.touch(); 
+                } 
+            }
+ 
 			cout << "[MYCODE] Replica Set Write Throttle Command succeeded" << endl;
 
             return true;
