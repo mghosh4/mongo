@@ -1525,11 +1525,11 @@ namespace mongo {
             string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
 			log() << "[MYCODE] INSIDE THE CODE" << rsLog;
 
-            while(!theReplSet->state().shunned())
+            /*while(!theReplSet->state().shunned())
             {
                 log() << "[MYCODE] Sleeping for 10 secs till member state changes to SHUNNED" << endl;
                 sleepsecs(10);
-            }
+            }*/
 
             // if we do a w=2 after every write
             bool secondaryThrottle = cmdObj["secondaryThrottle"].trueValue();

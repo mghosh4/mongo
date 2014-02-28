@@ -621,7 +621,7 @@ namespace mongo {
                             // We need to check the mongod error if we're inserting more documents,
                             // or if a later mongos error might mask an insert error,
                             // or if an earlier error might mask this error from GLE
-                            if (d.moreJSObjs() || group.hasException() || prevInsertException) {
+                            //if (d.moreJSObjs() || group.hasException() || prevInsertException) {
 
                                 LOG(3) << "running intermediate GLE to "
                                        << group.shard->toString() << " during bulk insert "
@@ -661,7 +661,7 @@ namespace mongo {
                                 // Clear out the shards we've checked so far, if we're successful
                                 //
                                 ci->clearSinceLastGetError();
-                            }
+                            //}
                         }
                         catch (DBException& e) {
                             // Network error on send or GLE
@@ -1070,6 +1070,49 @@ namespace mongo {
             dbcon->update( ns, query, toUpdate, flags );
 
             dbcon.done();
+
+            ClientInfo* ci = r.getClientInfo();
+
+            //
+            // WARNING: Without this, we will use the *previous* shard for GLE
+            //
+            ci->newRequest();
+
+            BSONObjBuilder gleB;
+            string errMsg;
+
+            // TODO: Can't actually pass GLE parameters here,
+            // so we use defaults?
+            ci->getLastError("admin",
+                             BSON( "getLastError" << 1 ),
+                             gleB,
+                             errMsg,
+                             false);
+
+            string updateErr = errMsg;
+            BSONObj gle = gleB.obj();
+            if (gle["err"].type() == String)
+                updateErr = gle["err"].String();
+
+            LOG(3) << "intermediate GLE result was " << gle
+                   << " errmsg: " << errMsg << endl;
+
+            if (updateErr.size() > 0) {
+
+                string errMsg = str::stream()
+                        << "error updating documents to shard "
+                        << shard->toString()
+                        << " at version "
+                        << (manager.get() ?
+                            manager->getVersion().toString() :
+                            ChunkVersion(0, OID()).toString())
+                        << causedBy(updateErr);
+
+                // If we're continuing-on-error and the update error is superseded by
+                // a later error from mongos, we shouldn't throw this error but the
+                // later one.
+                uasserted(16732, errMsg);
+            }
 
             if( chunk && r.getClientInfo()->autoSplitOk() )
                 chunk->splitIfShould( d.msg().header()->dataLen() );
