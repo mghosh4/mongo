@@ -19,7 +19,6 @@
 
 #include "mongo/client/dbclient.h"
 #include "mongo/util/time_support.h"
-#include "mongo/db/lasterror.h"
 //GENERAL BUILD COMMAND: g++ measureLatency.cpp  -I../../.. (this the mongo src folder) -L[mongo lib folder after build] -I[mongo include folder after build] -lmongoclient -lboost_thread-mt -lboost_filesystem -lboost_system -pthread -o measureLatency
 //FOR GOPAL: g++ measureLatency.cpp  -I../../.. -L/home/vgkholla/myBin/lib -I/home/vgkholla/myBin/include -lmongoclient -lboost_thread-mt -lboost_filesystem -lboost_system -pthread -o /home/vgkholla/myBin/otherBin/measureLatency
 
@@ -97,7 +96,7 @@ void run(string router, string ns, long long start, long long range, int sleepTi
                         insertObj = BSON("user_id" << user_id << "number" << number << "name" << "name");
                         //cout<<"insert: "<<insertObj.toString()<<endl;
                         c.insert(ns, insertObj);
-                        s = c.getLastError(false, false, 1, 0);
+                        s = c.getLastError(ns, false, false, 1, 0);
                         if (s.length() > 0)
                         {
                             flag = true;
