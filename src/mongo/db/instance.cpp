@@ -68,7 +68,7 @@ namespace mongo {
     inline void opread(Message& m) { if( _diaglog.getLevel() & 2 ) _diaglog.readop((char *) m.singleData(), m.header()->len); }
     inline void opwrite(Message& m) { if( _diaglog.getLevel() & 1 ) _diaglog.writeop((char *) m.singleData(), m.header()->len); }
 
-    bool isWriteThrottled();
+    bool isWriteThrottled(const string ns);
     void receivedKillCursors(Message& m);
     void receivedUpdate(Message& m, CurOp& op);
     void receivedDelete(Message& m, CurOp& op);
@@ -445,7 +445,8 @@ namespace mongo {
                     uassert( 16257, str::stream() << "Invalid ns [" << ns << "]", false );
                 }
                 else if ( op == dbInsert ) {
-                    if (isWriteThrottled())
+                    DbMessage d(m);
+                    if (isWriteThrottled(d.getns()))
                     {
                         BSONObjBuilder b;
                         log() << "[MYCODE] Write Op Throttled" << endl;
@@ -456,7 +457,8 @@ namespace mongo {
                     receivedInsert(m, currentOp);
                 }
                 else if ( op == dbUpdate ) {
-                    if (isWriteThrottled())
+                    DbMessage d(m);
+                    if (isWriteThrottled(d.getns()))
                     {
                         BSONObjBuilder b;
                         log() << "[MYCODE] Write Op Throttled" << endl;
@@ -467,7 +469,8 @@ namespace mongo {
                     receivedUpdate(m, currentOp);
                 }
                 else if ( op == dbDelete ) {
-                    if (isWriteThrottled())
+                    DbMessage d(m);
+                    if (isWriteThrottled(d.getns()))
                     {
                         BSONObjBuilder b;
                         log() << "[MYCODE] Write Op Throttled" << endl;
@@ -522,25 +525,36 @@ namespace mongo {
         debug.reset();
     } /* assembleResponse() */
 
-    bool isWriteThrottled()
+    bool isWriteThrottled(const string ns)
     {
-        const string rsSettingNS = "local.settings";
+        const string rsSettingNS = "local.writethrottle";
         DBDirectClient cli;
-        BSONObj throttleObj;
+        BSONObj throttleObj, o;
+        bool flag = false;
         if (cli.exists(rsSettingNS))
         {
             log() << "[MYCODE] Checking for throttle value" << endl;
             try
             {
-                throttleObj = cli.findOne(rsSettingNS, Query());
+                scoped_ptr<DBClientCursor> cursor(cli.query( rsSettingNS, Query() ));
+                while (cursor->more())
+                {
+                    o = cursor->next().getOwned();
+                    if (!ns.compare(o["_id"].String()))
+                    {
+                        flag = true;
+                        break;
+                    }
+                }
+
+                if (flag)
+                    throttleObj = o["stopped"].wrap();
+                else
+                    return false;
             }
             catch (DBException e)
             {
                 log() << "[MYCODE] dbexception: findOne call failed for " << rsSettingNS << endl;
-            }
-            catch (std::exception &e)
-            {
-                log() << "[MYCODE] exception: findOne call failed for " << rsSettingNS << endl;  
             }
 
             log() << "[MYCODE] Throttle value: " << throttleObj.toString() << endl;
