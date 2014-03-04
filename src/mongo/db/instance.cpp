@@ -624,6 +624,53 @@ namespace mongo {
         delete database; // closes files
     }
 
+    bool isOplogThrottled(const string ns)
+    {
+        const string rsSettingNS = "local.oplogthrottle";
+        DBDirectClient cli;
+        BSONObj throttleObj, o;
+        bool flag = false;
+        if (cli.exists(rsSettingNS))
+        {
+            log() << "[MYCODE] Checking for throttle value" << endl;
+            try
+            {
+                scoped_ptr<DBClientCursor> cursor(cli.query( rsSettingNS, Query() ));
+                while (cursor->more())
+                {
+                    o = cursor->next().getOwned();
+                    if (!ns.compare(o["_id"].String()))
+                    {
+                        flag = true;
+                        break;
+                    }
+                }
+
+                if (flag)
+                    throttleObj = o["stopped"].wrap();
+                else
+                    return false;
+            }
+            catch (DBException e)
+            {
+                log() << "[MYCODE] dbexception: findOne call failed for " << rsSettingNS << endl;
+            }
+
+            log() << "[MYCODE] Throttle value: " << throttleObj.toString() << endl;
+            if (!throttleObj["stopped"].eoo())
+            {
+                log() << "[MYCODE] Checking for stopped value" << endl;
+                bool stopped = throttleObj["stopped"].Bool();
+                if (stopped)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     void receivedUpdate(Message& m, CurOp& op) {
         DbMessage d(m);
         const char *ns = d.getns();
@@ -877,53 +924,6 @@ namespace mongo {
         if(!isOplogThrottled(ns)) {
             logOp("i", ns, js);
         }
-    }
-
-    bool isOplogThrottled(const string ns)
-    {
-        const string rsSettingNS = "local.oplogthrottle";
-        DBDirectClient cli;
-        BSONObj throttleObj, o;
-        bool flag = false;
-        if (cli.exists(rsSettingNS))
-        {
-            log() << "[MYCODE] Checking for throttle value" << endl;
-            try
-            {
-                scoped_ptr<DBClientCursor> cursor(cli.query( rsSettingNS, Query() ));
-                while (cursor->more())
-                {
-                    o = cursor->next().getOwned();
-                    if (!ns.compare(o["_id"].String()))
-                    {
-                        flag = true;
-                        break;
-                    }
-                }
-
-                if (flag)
-                    throttleObj = o["stopped"].wrap();
-                else
-                    return false;
-            }
-            catch (DBException e)
-            {
-                log() << "[MYCODE] dbexception: findOne call failed for " << rsSettingNS << endl;
-            }
-
-            log() << "[MYCODE] Throttle value: " << throttleObj.toString() << endl;
-            if (!throttleObj["stopped"].eoo())
-            {
-                log() << "[MYCODE] Checking for stopped value" << endl;
-                bool stopped = throttleObj["stopped"].Bool();
-                if (stopped)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     NOINLINE_DECL void insertMulti(bool keepGoing, const char *ns, vector<BSONObj>& objs, CurOp& op) {
