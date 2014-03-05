@@ -124,7 +124,7 @@ namespace replset {
         const char *ns = op.getStringField("ns");
         verify(ns);
 
-        if ( (*ns == '\0') || (*ns == '.') || isOplogThrottled(ns) ) {
+        if ( (*ns == '\0') || (*ns == '.') ) {
             // this is ugly
             // this is often a no-op
             // but can't be 100% sure
@@ -133,6 +133,9 @@ namespace replset {
             }
             return true;
         }
+
+        if (isOplogThrottled(ns))
+            return true;
 
         bool isCommand(op["op"].valuestrsafe()[0] == 'c');
 
