@@ -150,8 +150,6 @@ namespace replset {
             lk.reset(new Lock::DBWrite(ns)); 
         }
 
-        log() << "[MYCODE] Oplog op received:" << op.toString() << endl;
-
         Client::Context ctx(ns, dbpath);
         ctx.getClient()->curop()->reset();
         // For non-initial-sync, we convert updates to upserts
