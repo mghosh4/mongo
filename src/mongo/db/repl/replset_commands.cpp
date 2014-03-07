@@ -882,7 +882,8 @@ namespace mongo {
 
             //declare the arguments we want
             string ns;                                          //namespace
-            OpTime startTime;                                   //time from which oplog needs to be replayed        
+            OpTime startTime;                                   //time from which oplog needs to be replayed
+            OpTime endTime;                                      //time from which oplog needs to be replayed        
             string primary;                               	    //the primary to connect to (for oplog details)
             int shardID;                                        //the id for this shard
             bool replayAllOps;                                  //replay all the ops or not
@@ -897,18 +898,18 @@ namespace mongo {
             //do some checks to see we have all the info we require
             //also extract the arguments in the same call
             if( !checkAndExtractArgs(oplogParams, errmsg,
-                                        ns, startTime, primary, shardID, numChunks, replayAllOps,
+                                        ns, startTime, endTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas)) {
                 success = false;
             } else {
 
-                printExtractedArgs(ns, startTime, primary, shardID, numChunks, replayAllOps,
+                printExtractedArgs(ns, startTime, endTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas);
 
                 //replay the oplog
-                success =  replayOplog(errmsg, ns, startTime, primary, shardID, numChunks, replayAllOps,
+                success =  replayOplog(errmsg, ns, startTime, endTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas);
             }
@@ -925,7 +926,7 @@ namespace mongo {
             return success;
         }
 
-        bool replayOplog(string& errmsg, string ns, OpTime& startTime, string primary, int shardID, int numChunks, bool replayAllOps,
+        bool replayOplog(string& errmsg, string ns, OpTime& startTime, OpTime& endTime, string primary, int shardID, int numChunks, bool replayAllOps,
                                     BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax, 
                                     vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
 
@@ -939,7 +940,7 @@ namespace mongo {
             for(int i = 0; i < iterations; i++) {
                 printLogID();
                 cout<<"Executing iteration of replayOnce: " << i <<endl;
-                if( replayOnce(errmsg, done, prevlastOp, startTime, ns, primary, shardID, numChunks, replayAllOps,
+                if( replayOnce(errmsg, done, prevlastOp, startTime, endTime, ns, primary, shardID, numChunks, replayAllOps,
                                     proposedKey, globalMin, globalMax,
                                     splitPoints, assignments, removedReplicas)) {
                     if(done) { //if replay once succeded and done is true, there were no more ops to replay
@@ -977,7 +978,7 @@ namespace mongo {
             cout<<"[MYCODE_HOLLA] ";
         }
 
-        void printExtractedArgs(string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
+        void printExtractedArgs(string& ns, OpTime& startTime, OpTime& endTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
                                     BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
                                     vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             printLogID();
@@ -992,6 +993,10 @@ namespace mongo {
             cout<<"Num chunks: "<<numChunks<<endl;
             printLogID();
             cout<<"Get all ops: "<<replayAllOps<<endl;
+            if(replayAllOps){
+                printLogID();
+                cout<<"End time is: "<<endTime.toString()<<endl;
+            }
             printLogID();
             cout<<"Proposed key: "<<proposedKey.toString()<<endl;
             printLogID();
@@ -1019,7 +1024,7 @@ namespace mongo {
         }
 
         bool checkAndExtractArgs(BSONObj oplogParams, string& errmsg,
-                                    string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
+                                    string& ns, OpTime& startTime, OpTime& endTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
                                     BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
                                     vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             //printLogID();
@@ -1071,6 +1076,15 @@ namespace mongo {
 
             //get all ops or not
             replayAllOps = oplogParams["replayAllOps"].Bool();
+
+            if(replayAllOps) {
+                //end time
+                endTime = oplogParams["endTime"]._opTime();
+                if (endTime.isNull()) {
+                    errmsg = "no end time";
+                    return false;
+                }
+            }
 
             //printLogID();
             //cout<<"numChunks done"<<endl;
@@ -1136,7 +1150,7 @@ namespace mongo {
             return true;
         }
 
-        bool replayOnce(string& errmsg, bool& done, BSONObj& prevlastOp, OpTime& startTime, string ns, string primary, 
+        bool replayOnce(string& errmsg, bool& done, BSONObj& prevlastOp, OpTime& startTime, OpTime& endTime, string ns, string primary, 
                                     int shardID, int numChunks, bool replayAllOps,
                                     BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax,
                                     vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
@@ -1148,7 +1162,7 @@ namespace mongo {
             //get all the ops that need to be replayed
             vector<BSONObj> opsToReplay;
             BSONObj lastOp = BSONObj();
-            success = getOpsToReplay(errmsg, lastOp, startTime, ns, primary, opsToReplay, replayAllOps);
+            success = getOpsToReplay(errmsg, lastOp, startTime, endTime, ns, primary, opsToReplay, replayAllOps);
 
             if(success) {
                 printLogID();
@@ -1177,7 +1191,7 @@ namespace mongo {
             return success;
         }
 
-        bool getOpsToReplay(string& errmsg, BSONObj& lastOp, OpTime& startTime, string ns, string primary, vector<BSONObj>& opsToReplay, bool replayAllOps) {
+        bool getOpsToReplay(string& errmsg, BSONObj& lastOp, OpTime& startTime, OpTime& endTime, string ns, string primary, vector<BSONObj>& opsToReplay, bool replayAllOps) {
             BSONObj info;       //return info
             
             int cap = 100;      //number of oplogs we will get to replay per round will be <= cap if 'replayAllOps' is not true
@@ -1211,7 +1225,9 @@ namespace mongo {
                     lastOp = queryResult.copy();
 
                     //bail out if we reached the cap and 'replayAllOps' is not true
-                    if(!replayAllOps && (int)opsToReplay.size() >= cap) {
+                    if(replayAllOps && startTime > endTime) {
+                        break;
+                    } else if(!replayAllOps && (int)opsToReplay.size() >= cap) {
                         break;
                     }
                     

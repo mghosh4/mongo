@@ -1216,18 +1216,24 @@ namespace mongo {
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, false);
+                            errmsg, false, currTSVector);
 
 				// 3. Write Throttle
 				log() << "[MYCODE_TIME] Throttling Writes" << endl;
 				replicaThrottle(ns, numShards, primary, true);
 
                 // 4. Oplog Replay again
+                OpTime endTS[numShards]; 
+                checkTimestamp(primary, numShards, endTS);
+
+                //conversion from array to vector
+                vector<OpTime> endTSVector(endTS, endTS + numShards);
+                
                 log() << "[MYCODE_TIME] Replaying Oplog again" << endl;
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, true);
+                            errmsg, true, endTSVector );
 
 				if (configUpdate)
 				{
@@ -1250,11 +1256,11 @@ namespace mongo {
             bool replayOplog(const string ns, BSONObj proposedKey, BSONObjSet splitPoints,  
                                 int numShards, string primary[], string removedReplicas[], vector<OpTime>& startTS,
                                 int numChunks,  int assignments[], 
-                                string& errmsg, bool replayAllOps) {
+                                string& errmsg, bool replayAllOps, vector<OpTime>& endTS) {
                 //success variable
                 bool success = true;
 
-                cout<<"[MYCODE_HOLLA] ==== In test replay ==== "<<endl;
+                cout<<"[MYCODE_HOLLA] ==== In replyOplog ==== "<<endl;
 
                 //global min and max (positive and negative infinities)
                 BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
@@ -1292,6 +1298,10 @@ namespace mongo {
                     params.append("assignments", assignmentsVector);                    //the new assignments for chunks
                     params.append("removedReplicas", removedReplicasVector);            //the other removed replicas
                     params.append("replayAllOps", replayAllOps);                        //replay all ops or not (if false, caps ops to replay which might or might not cover all ops)
+
+                    if(replayAllOps){
+                        params.append("endTime", endTS[i]);                              //if replayAllOps is true then we need a time till when we want to replay
+                    }
 
                     //create an object to encapsulate all the params
                     BSONObj oplogParams = params.obj();                 
