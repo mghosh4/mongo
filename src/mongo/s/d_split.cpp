@@ -185,7 +185,7 @@ namespace mongo {
     class SplitVector : public Command {
     public:
         SplitVector() : Command( "splitVector" , false ) {}
-        virtual bool slaveOk() const { return false; }
+        virtual bool slaveOk() const { return true; }
         virtual LockType locktype() const { return NONE; }
         virtual void help( stringstream &help ) const {
             help <<
@@ -517,7 +517,7 @@ namespace mongo {
                  " { splitChunk:\"db.foo\" , keyPattern: {a:1} , min : {a:100} , max: {a:200} { splitKeys : [ {a:150} , ... ]}";
         }
 
-        virtual bool slaveOk() const { return false; }
+        virtual bool slaveOk() const { return true; }
         virtual bool adminOnly() const { return true; }
         virtual LockType locktype() const { return NONE; }
         virtual void addRequiredPrivileges(const std::string& dbname,

@@ -7,7 +7,7 @@
 void HungarianAlgo::max_cost_assignment(long long ** datainkr, int numRow, int numColumn,int assignment[])
 {
 
-	#ifdef DEBUG
+	//#ifdef DEBUG
 	std::cout << "Munkres input matrix:" << std::endl;
 	  for (  int row = 0 ; row < numRow ; row++ ) {
 	    for (  int col = 0 ; col < numColumn ; col++ ) {
@@ -19,7 +19,7 @@ void HungarianAlgo::max_cost_assignment(long long ** datainkr, int numRow, int n
 	    std::cout << std::endl;
 	  }
 	  std::cout << std::endl;
-	#endif
+	//#endif
         
 	min_cost_assignment(datainkr,numRow,numColumn,assignment);
 }

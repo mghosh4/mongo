@@ -1500,9 +1500,7 @@ namespace mongo {
      * this is called on the "to" side
      */
     class MoveDataCommand : public Command {
-    private:
-        boost::mutex mx_;
-        vector<BSONObj> list;
+        
     public:
         MoveDataCommand() : Command( "moveData" ) {}
         virtual void help( stringstream& help ) const {
@@ -1523,6 +1521,7 @@ namespace mongo {
 
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // 1.
+            Timer t;
             log()<<"[WWT] Move Data Starts"<<endl;
             const string ns = cmdObj.firstElement().str();
             BSONObj proposedKey = cmdObj["proposedKey"].Obj();
@@ -1606,39 +1605,42 @@ namespace mongo {
                 shardingState.enable( configdb );
                 configServer.init( configdb );
             }
-             //Split range into sub-ranges
-             BSONObjSet rangeSet;
+             bool multithread = cmdObj["multithread"].trueValue();
+             if(multithread==true){
+                log() << "[WWT] multithreading\n";
+             	//Split range into sub-ranges
+             	BSONObjSet rangeSet;
 
-             BSONObj min = cmdObj.getObjectField( "min" );
-             BSONObj max = cmdObj.getObjectField( "max" );
-             int subChunk = 10;
-             scoped_ptr<ScopedDbConnection> conn(
-                            ScopedDbConnection::getInternalScopedDbConnection(fromReplicaSet));
-             BSONObj splitResult;
-             BSONObjBuilder cmd;
-             cmd.append( "splitVector" , ns );//TO-DO make sure this is the right ns
-             cmd.append( "keyPattern" , proposedKey );
-             cmd.append( "min" , min );
-             cmd.append( "max" , max );
-             cmd.append( "range", range);
-             cmd.append( "maxChunkSizeBytes" , maxSizeElem.Int() );
-             cmd.append( "maxSplitPoints" , subChunk);
-             //cmd.append( "maxChunkObjects" , maxObjs ); don't need this, in SplitVector deal with this
-             cmd.appendBool( "subSplit" , true);
-             BSONObj splitCmdObj = cmd.obj();
+             	BSONObj min = cmdObj.getObjectField( "min" );
+             	BSONObj max = cmdObj.getObjectField( "max" );
+             	int subChunk = 10;
+             	scoped_ptr<ScopedDbConnection> conn(
+                            ScopedDbConnection::getInternalScopedDbConnection(from));
+             	BSONObj splitResult;
+             	BSONObjBuilder cmd;
+             	cmd.append( "splitVector" , ns );//TO-DO make sure this is the right ns
+             	cmd.append( "keyPattern" , proposedKey );
+	        cmd.append( "min" , min );
+        	cmd.append( "max" , max );
+             	cmd.append( "range", range);
+             	cmd.append( "maxChunkSizeBytes" , maxSizeElem.Int() );
+             	cmd.append( "maxSplitPoints" , subChunk);
+             	//cmd.append( "maxChunkObjects" , maxObjs ); don't need this, in SplitVector deal with this
+             	cmd.appendBool( "subSplit" , true);
+             	BSONObj splitCmdObj = cmd.obj();
         
-             if ( ! conn->get()->runCommand( "admin" , splitCmdObj , splitResult )) {
+             	if ( ! conn->get()->runCommand( "admin" , splitCmdObj , splitResult )) {
                   conn->done();
                   log() << "[WWT] Pick split Vector cmd failed\n";
                   return false;
-             }
+             	}
         
-             log() << "[WWT] Pick split Vector cmd done\n";
+            	 log() << "[WWT] Pick split Vector cmd done\n";
 
 
-             BSONObjIterator it( splitResult.getObjectField( "splitKeys" ) );
-             BSONObj prev;
-             for(int j=0;j<subChunk;j++){
+             	BSONObjIterator it( splitResult.getObjectField( "splitKeys" ) );
+             	BSONObj prev;
+             	for(int j=0;j<subChunk;j++){
                   BSONObj current;
                   if(it.more()){
                          current = it.next().Obj().getOwned();
@@ -1654,8 +1656,8 @@ namespace mongo {
                   rangeSet.insert( range.getOwned() );
              
 		  prev = current;
-             }
-             conn->done();
+             	}
+             	conn->done();
              
             //MoveTimingHelper timing( "from" , ns , min , max , 6 /* steps */ , errmsg );
 
@@ -1665,44 +1667,111 @@ namespace mongo {
             // Shard::reloadShardInfo();
 
 			// Insert all the data within the range in this shard
-            vector<shared_ptr<boost::thread> > migrateThreads;
-            BSONObjSet::iterator range_ptr = rangeSet.begin();
-            int concurrentThread = 2;
-            
-            while(range_ptr!=rangeSet.end()){
-                 log()<<"subRange:"<<range_ptr->toString()<<endl;
-                 range_ptr++;
-           }
-            range_ptr = rangeSet.begin();
-            
-            //list.push_back(*range_ptr);
-            while(range_ptr!=rangeSet.end()){
-                 //may change the concurrentThread number here
-                int realConcurrentThread = 0;
-                for(int i=0;i<concurrentThread;i++){
-                   // if(range_ptr!=rangeSet.end()){
-                        //create thread here
-                       migrateThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&MoveDataCommand::singleMigrate, this, from, *range_ptr, ns,key))));
-                        range_ptr++;
-                        realConcurrentThread++;
-                    //} else {
-                    //   break;
-                    //}
-                }
-                for(int i=0;i<realConcurrentThread;i++){
-                   migrateThreads[i]->join();
-                }
+            	vector<shared_ptr<boost::thread> > migrateThreads;
+            	BSONObjSet::iterator range_ptr = rangeSet.begin();
+            	int requestThread = 10;
+                int localFinishedThread = 0;
                 
-                log()<<"[WWT] total count in this round = "<<list.size()<<endl;
-               log()<<"[WWT] start another round"<<endl;
-                migrateThreads.clear();
+		int concurrentThread = 0;
+           	 while(range_ptr!=rangeSet.end()){
+              	   log()<<"subRange:"<<range_ptr->toString()<<endl;
+              	   range_ptr++;
+           	}
+            	range_ptr = rangeSet.begin();
+            	DBClientConnection::setLazyKillCursor(false);
+
+		boost::mutex finish_mx_;
+        	boost::mutex mx_;
+        	vector<BSONObj> list;
+        	int globalFinishedThread=0;
+
+            	//list.push_back(*range_ptr);
+            	while(range_ptr!=rangeSet.end()){
+                        int newThread = requestThread-concurrentThread;
+                	log()<<"create new Thread = "<<newThread<<endl;
+
+                	for(int i=0;i<newThread;i++){
+                   		if(range_ptr!=rangeSet.end()){
+                        
+                      	 		migrateThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&MoveDataCommand::singleMigrate, this, from, *range_ptr, ns,key,boost::ref(list),boost::ref(globalFinishedThread), boost::ref(mx_), boost::ref(finish_mx_)))));
+                        		range_ptr++;
+                        		concurrentThread++;
+                    		}
+                	}
+                        log()<<"[WWT] concurrentThread = "<<concurrentThread<<endl;
+                        while(true){
+			     log()<<"[WWT] begin the check localFinishedThread = "<<localFinishedThread<<endl;
+                             while(localFinishedThread==0){
+                             	
+                                log()<<"[WWT] sleeping for 1 s"<<endl;
+                                boost::this_thread::sleep(boost::posix_time::seconds(1));
+                                finish_mx_.lock();
+                             	localFinishedThread = globalFinishedThread;
+                             	finish_mx_.unlock();
+                             }
+                             log()<<"[WWT] localFinishedThread = "<<localFinishedThread<<endl;
+                             finish_mx_.lock();
+                             globalFinishedThread-=localFinishedThread;
+                             log()<<"[WWT] globalFinishedThread = "<<globalFinishedThread<<endl;
+                             finish_mx_.unlock();
+                             //write into database
+                             /*
+                             PageFaultRetryableSection pgrs;
+                	     log()<<"start insert to file list size="<<list.size()<<endl;
+                             mx_.lock();
+                	     for(unsigned int i=0;i<list.size();i++){
+                        
+                    		try {
+					Lock::DBWrite r(ns);
+					Client::Context context(ns);
+					theDataFileMgr.insert(ns.c_str(), list[i].objdata(), list[i].objsize());
+            	    		}
+            	    		catch ( PageFaultException& e ) {
+            	        		e.touch();
+            	    		}
+            	    
+               		     }
+                	     list.clear();
+                	     mx_.unlock();
+				*/
+                             //change concurrentThread here
+                             requestThread++;
+                             //update concurrentThread
+                             concurrentThread-=localFinishedThread;
+                             log()<<"[WWT] concurrentThread = "<<concurrentThread<<endl;
+                             log()<<"[WWT] requestThread = "<<requestThread<<endl;
+                             localFinishedThread = 0;
+
+                             if(concurrentThread < requestThread){
+                                 //go out to create more thread
+                                 break;
+                             }
+                             else{
+                                 //current thread is enough, wait for more thread to finish
+                                 
+                                 continue;
+                             }
+                             
+                        }	
+                	//for(int i=0;i<realConcurrentThread;i++){
+                   	//migrateThreads[i]->join();
+                	//}
                 
-            }
-		PageFaultRetryableSection pgrs;
-                log()<<"start insert to file list size="<<list.size()<<endl;
+                	//log()<<"[WWT] total count in this round = "<<list.size()<<endl;
+               		//log()<<"[WWT] start another round"<<endl;
+                	//migrateThreads.clear();
+
+                        
+            	}
+		for (unsigned i = 0; i < migrateThreads.size(); i++) {
+			migrateThreads[i]->join();
+		}
+                /*
+		log()<<"finish leftover list size="<<list.size()<<endl;
+                mx_.lock();
                 for(unsigned int i=0;i<list.size();i++){
                         
-                     try {
+                    	try {
 				Lock::DBWrite r(ns);
 				Client::Context context(ns);
 				theDataFileMgr.insert(ns.c_str(), list[i].objdata(), list[i].objsize());
@@ -1713,19 +1782,15 @@ namespace mongo {
             	    
                 }
                 list.clear();
-	
-			return true;
-		}
-            void singleMigrate( string from, BSONObj range, string ns,string key)
-           {
-                /*scoped_ptr<DBDirectClient> direct;
-                    DBClientBase * conn;
-                    direct.reset( new DBDirectClient() );
-                    conn = direct.get();
-*/              log()<<"initial global list = " <<list.size()<<endl;
-                vector<BSONObj> local;
-                scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
-                   //Lock::ParallelBatchWriterMode::iAmABatchParticipant();               
+                mx_.unlock();
+		*/
+	        DBClientConnection::setLazyKillCursor(true);
+                log()<<"[WWT] MoveDataCommand Finish in "<<t.millis()<<endl;
+		return true;
+             } //end of multithread == true
+             else { //non multithread case
+               scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
+
 			BSONObj o;
 			BSONObj qRange = range.getOwned();
 			int count = 0;
@@ -1735,37 +1800,94 @@ namespace mongo {
 				scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
 
 				try
-				{   
-                                                                            
-                                        
+				{
 					while (cursor->more()) {
 						count++;
 						o = cursor->next().getOwned();
-						log() << "[MYCODE WWT] DATA: " << o.toString() << rsLog;
-                                                mx_.lock();
-                      				list.push_back(o);
-                        			mx_.unlock();                                                
-//local.push_back(o);
-                                                
-        				/*{
-
-            				//Never been used ?
-                                        PageFaultRetryableSection pgrs;
+						//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+        				{
+            				PageFaultRetryableSection pgrs;
 	        	    		while ( 1 ) {
     	    	        		try {
 									Lock::DBWrite r(ns);
 									Client::Context context(ns);
 									theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
-                                            
             	        			break;
             	    			}
             	    			catch ( PageFaultException& e ) {
             	        			e.touch();
             	    			}
             				}
-        				}*/
-                                         
-                                         //conn->insert(ns,o);
+        				}
+					}
+					break;
+				}
+				catch (DBException e)
+				{
+					log() << "Last BSONObj before crash:" << o.toString() << endl;
+
+					BSONObjBuilder b;
+					BSONObjBuilder sub(b.subobjStart(key));
+					sub.appendAs(o[key], "$gt");
+					BSONObj rangeVal = qRange[key].Obj();
+					if (!rangeVal["$lt"].eoo())
+						sub.append(rangeVal["$lt"]);
+					BSONObj subObj = sub.done();
+					qRange = b.done().getOwned();
+				}
+			}
+
+			log() << "[MYCODE] count: " << count << endl;
+
+			//Delete all the data from the source shard
+
+			while (true)
+			{
+				try
+				{
+					fromConn->get()->remove(ns, range);
+					break;
+				}
+				catch (DBException e)
+				{
+					continue;
+				}
+			}
+
+			log() << "[MYCODE] Removal Complete" << endl;
+			fromConn->done();
+			log()<<"[WWT] MoveDataCommand Finish in "<<t.millis()<<endl;
+			return true;
+             	}
+	   }
+            void singleMigrate( string from, BSONObj range, string ns,string key, vector<BSONObj>& list, int& globalFinishedThread, boost::mutex& mx_, boost::mutex& finish_mx_)
+           {
+                Client::initThread(range.getOwned().toString().c_str());
+                Lock::ParallelBatchWriterMode::iAmABatchParticipant();
+                log()<<"initial global list = " <<list.size()<<endl;
+                vector<BSONObj> local;
+                scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
+              
+			BSONObj o;
+			BSONObj qRange = range.getOwned();
+			int count = 0;
+			while(1)
+			{
+				log() << "Query Range:" << qRange.toString() << endl;
+				scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));    
+				/*
+				try
+				{   
+
+					while (cursor->more()) {
+						count++;
+						o = cursor->next().getOwned();
+						//log() << "[MYCODE WWT] DATA: " << o.toString() << rsLog;
+                                                //mx_.lock();
+                      				//list.push_back(o);
+                        			//mx_.unlock();                                                
+						local.push_back(o);
+                 
 					}
 					break;
 				}
@@ -1784,16 +1906,51 @@ namespace mongo {
 					BSONObj subObj = sub.done();
 					qRange = b.done().getOwned();
 				}
+				*/
+                                try
+				{
+					while (cursor->more()) {
+						count++;
+						o = cursor->next().getOwned();
+						//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+        				{
+                                        
+            				PageFaultRetryableSection pgrs;
+	        	    		while ( 1 ) {
+    	    	        		try {
+									Lock::DBWrite r(ns);
+									Client::Context context(ns);
+									theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
+            	        			break;
+            	    			}
+            	    			catch ( PageFaultException& e ) {
+            	        			e.touch();
+            	    			}
+            				}
+        				}
+					}
+					break;
+				}
+				catch (DBException e)
+				{
+					log() << "Last BSONObj before crash:" << o.toString() << endl;
+
+					BSONObjBuilder b;
+					BSONObjBuilder sub(b.subobjStart(key));
+					sub.appendAs(o[key], "$gt");
+					BSONObj rangeVal = qRange[key].Obj();
+					if (!rangeVal["$lt"].eoo())
+						sub.append(rangeVal["$lt"]);
+					BSONObj subObj = sub.done();
+					qRange = b.done().getOwned();
+				}
 			}
                        // log() << "[MYCODE] count: " << local.size() << endl;
-                        //mx_.lock();
-                        //list.insert(list.end(),local.begin(),local.end());
-                       // mx_.unlock();
-                        log() << "[MYCODE] global count: " << list.size() << endl;
-			
-
+                       // mx_.lock();
+                       // list.insert(list.end(),local.begin(),local.end());
+                      //  mx_.unlock();
+                       // log() << "[MYCODE] global count: "<< list.size() << endl;
 			//Delete all the data from the source shard
-
 			while (true)
 			{
 				try
@@ -1809,7 +1966,13 @@ namespace mongo {
 
 			log() << "[MYCODE WWT] Removal Complete" << endl;
 			fromConn->done();
+                        finish_mx_.lock();
+                        globalFinishedThread++;
+                        finish_mx_.unlock();
+                        
+                        cc().shutdown();
             }
+
             BSONObj getRangeAsBSON(const char* key, BSONObj min, BSONObj max)
             {
                 BSONElement minElem = min[key];
