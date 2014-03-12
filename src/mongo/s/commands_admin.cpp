@@ -1748,7 +1748,7 @@ namespace mongo {
 					for (int j = 0; j < numShards; j++)
 						datainkr[i][j] = 0;
 
-                collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
+                //collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
 
                 delete[] datainkr;
 			}
