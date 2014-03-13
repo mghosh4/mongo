@@ -1606,9 +1606,11 @@ namespace mongo {
                 configServer.init( configdb );
             }
              bool multithread = cmdObj["multithread"].trueValue();
+             Timer t1;
              if(multithread==true){
                 log() << "[WWT] multithreading\n";
              	//Split range into sub-ranges
+                
              	BSONObjSet rangeSet;
 
              	BSONObj min = cmdObj.getObjectField( "min" );
@@ -1658,7 +1660,7 @@ namespace mongo {
 		  prev = current;
              	}
              	conn->done();
-             
+             log()<<"[WWT] SplitVector Finish in "<<t1.millis()<<endl;
             //MoveTimingHelper timing( "from" , ns , min , max , 6 /* steps */ , errmsg );
 
             // Make sure we're as up-to-date as possible with shard information
@@ -1785,6 +1787,7 @@ namespace mongo {
                 mx_.unlock();
 		*/
 	        DBClientConnection::setLazyKillCursor(true);
+                log()<<"[WWT] FetchingData Finish in "<<t1.millis()<<endl;
                 log()<<"[WWT] MoveDataCommand Finish in "<<t.millis()<<endl;
 		return true;
              } //end of multithread == true
@@ -1856,6 +1859,7 @@ namespace mongo {
 
 			log() << "[MYCODE] Removal Complete" << endl;
 			fromConn->done();
+                        log()<<"[WWT] FetchingData Finish in "<<t1.millis()<<endl;
 			log()<<"[WWT] MoveDataCommand Finish in "<<t.millis()<<endl;
 			return true;
              	}
@@ -1867,7 +1871,7 @@ namespace mongo {
                 log()<<"initial global list = " <<list.size()<<endl;
                 vector<BSONObj> local;
                 scoped_ptr<ScopedDbConnection> fromConn(ScopedDbConnection::getScopedDbConnection( from ) );
-              
+                log()<<"[WWT] ConnID:"<< fromConn->get()->getConnectionId() << "ConnCreationSec:" << fromConn->get()->getSockCreationMicroSec()<<endl;
 			BSONObj o;
 			BSONObj qRange = range.getOwned();
 			int count = 0;
