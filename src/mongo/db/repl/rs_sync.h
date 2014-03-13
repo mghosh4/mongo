@@ -124,6 +124,7 @@ namespace replset {
                                std::vector< std::vector<BSONObj> >* writerVectors);
         void handleSlaveDelay(const BSONObj& op);
         void setOplogVersion(const BSONObj& op);
+        bool isOplogThrottled(const string ns);
     };
 
     /**

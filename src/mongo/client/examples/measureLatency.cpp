@@ -15,14 +15,13 @@
  *    limitations under the License.
  */
 
-#include <iostream>
-#include <cstdlib>
-#include <ctime>
+#include "pch.h"
+
 #include "mongo/client/dbclient.h"
 #include "mongo/util/time_support.h"
-
 //GENERAL BUILD COMMAND: g++ measureLatency.cpp  -I../../.. (this the mongo src folder) -L[mongo lib folder after build] -I[mongo include folder after build] -lmongoclient -lboost_thread-mt -lboost_filesystem -lboost_system -pthread -o measureLatency
 //FOR GOPAL: g++ measureLatency.cpp  -I../../.. -L/home/vgkholla/myBin/lib -I/home/vgkholla/myBin/include -lmongoclient -lboost_thread-mt -lboost_filesystem -lboost_system -pthread -o /home/vgkholla/myBin/otherBin/measureLatency
+
 using namespace mongo;
 
 struct timeval subtract(struct timeval start_time, struct timeval stop_time) {
@@ -49,6 +48,7 @@ struct timeval subtract(struct timeval start_time, struct timeval stop_time) {
 void run(string router, string ns, long long start, long long range, int sleepTime) {
     DBClientConnection c;
     c.connect(router);
+    c.setWriteConcern(W_NORMAL);
     
     struct timeval start_time, stop_time, delay;
     char timeStr[25];
@@ -58,7 +58,7 @@ void run(string router, string ns, long long start, long long range, int sleepTi
     long long user_id = -1;
     long long number = -1;
     int opSelector;
-
+    string s;
 
     BSONObj insertObj;
     BSONObj query;
@@ -96,6 +96,12 @@ void run(string router, string ns, long long start, long long range, int sleepTi
                         insertObj = BSON("user_id" << user_id << "number" << number << "name" << "name");
                         //cout<<"insert: "<<insertObj.toString()<<endl;
                         c.insert(ns, insertObj);
+                        s = c.getLastError(ns, false, false, 1, 0);
+                        if (s.length() > 0)
+                        {
+                            flag = true;
+                            cout << "Error:" << s << endl;
+                        }
                     break;
                 case 1: //update
                         operation = "update";
@@ -104,6 +110,12 @@ void run(string router, string ns, long long start, long long range, int sleepTi
                         updateObj = BSON("user_id" << user_id << "number" << number << "name" << "nameUpdated");
                         //cout<<"update: "<<updateObj.toString()<<endl;
                         c.update(ns, Query(query), updateObj);
+                        s = c.getLastError(ns, false, false, 1, 0);
+                        if (s.length() > 0)
+                        {
+                            flag = true;
+                            cout << "Error:" << s << endl;
+                        }
                     break;
                 case 2:
                         //read
@@ -111,6 +123,14 @@ void run(string router, string ns, long long start, long long range, int sleepTi
                         readObj = BSON("user_id" << user_id);
                         //cout<<"read: "<<readObj.toString()<<endl;
                         b = c.findOne(ns, Query(readObj), 0, QueryOption_SlaveOk);
+                        if (b.isEmpty() <= 0)
+                            flag = true;
+                        s = c.getLastError(ns, false, false, 1, 0);
+                        if (s.length() > 0)
+                        {
+                            flag = true;
+                            cout << "Error:" << s << endl;
+                        }
                     break;
                 default:
                     cout<<"Unrecognized opSelector ! " << opSelector << endl;
@@ -122,13 +142,16 @@ void run(string router, string ns, long long start, long long range, int sleepTi
             cout << "Error: " << e.toString() << endl;
         }
 
-        cout<<operation<<": ";
         if (!flag) {
             gettimeofday(&stop_time, NULL);
+            if (opSelector == 2)
+		        cout << "Returned result:" << b.toString() << endl;
             delay = subtract(start_time, stop_time);
+            cout<<operation<<": ";
             cout << timeStr << ": " << delay.tv_sec*1000 + delay.tv_usec/(double)1000 << endl;
         } else {
-            cout<<"Failed: Error logged"; 
+            cout<<operation<<": ";
+		    cout << timeStr << ": -100" << endl;
         }
 
         usleep(sleepTime);

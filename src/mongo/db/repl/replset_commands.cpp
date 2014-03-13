@@ -365,18 +365,17 @@ namespace mongo {
             if( !check(errmsg, result) )
                 return false;
 
+            string rsSettingNS = cmdObj["replSetWriteThrottle"].String();
+            string ns = cmdObj["namespace"].String();
 			bool throttle = cmdObj["throttle"].Bool();
-			const char *rsSettingNS = "local.settings";
             OpDebug debug;
 
             PageFaultRetryableSection s; 
             while ( 1 ) { 
                 try { 
                     Lock::DBWrite lk(rsSettingNS); 
-                     
                     Client::Context ctx( rsSettingNS ); 
-                     
-                    UpdateResult res = updateObjects(rsSettingNS, BSON( "$set" << BSON( "stopped" << throttle )), BSON( "_id" << "throttle" ), true, false, false, debug ); 
+                    UpdateResult res = updateObjects(rsSettingNS.c_str(), BSON( "$set" << BSON( "stopped" << throttle )), BSON( "_id" << ns ), true, false, false, debug ); 
                     lastError.getSafe()->recordUpdate( res.existing , res.num , res.upserted ); // for getlasterror 
                     break; 
                 } 
@@ -577,6 +576,10 @@ namespace mongo {
 			{
 				BSONObj hostObj = (*it).Obj();
 				cout << "[MYCODE] ReplSetAdd MEMBER:" << hostObj.toString() << endl;
+                if (!addedHost.compare(hostObj["host"].String()))
+                        continue;
+
+				cout << "[MYCODE] ReplSetAdd MEMBER:" << hostObj.toString() << endl;
 				newMember.append(*it);
 
 				if (hostObj["priority"].ok() && maxPr < hostObj["priority"].Double())
@@ -674,6 +677,176 @@ namespace mongo {
         }
     } cmdReplSetAdd;
 
+    /*class CmdReplSetAdd : public ReplSetCommand {
+    public:
+        virtual void help( stringstream &help ) const {
+            help << "{ {replSetAdd : <host>}, {primary: true} }";
+            help << "'add' member to the replica set. If primary is true then add as primary\n";
+            help << "\nhttp://dochub.mongodb.org/core/replicasetcommands";
+        }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::replSetAdd);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        CmdReplSetAdd() : ReplSetCommand("replSetAdd") { }
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {*/
+			/*if ( cmdObj["replSetAdd"] != String ) {
+				errmsg = "no hostname specified";
+				return false;
+			}*/
+			/*if( !check(errmsg, result) )
+                return false;
+
+			cout << "[MYCODE] ReplSetAdd CMDOBJ:" << cmdObj.toString() << endl;
+			string addedHost = cmdObj["replSetAdd"].String();
+			bool wantPrimary = cmdObj["primary"].Bool();
+			int addedHostID = cmdObj["id"].Int();
+
+			BSONObj config = theReplSet->getConfig().asBson().getOwned();
+			cout << "[MYCODE] ReplSetAdd CONFIGPRINT:" << config.toString() << "\n";
+
+			string id = config["_id"].String();
+			int version = config["version"].Int();
+			vector<ReplSetConfig::MemberCfg> configMembers = theReplSet->config().members;
+			string myid = theReplSet->config()._id;
+			int max = 0;
+			for( vector<ReplSetConfig::MemberCfg>::const_iterator i = configMembers.begin(); i != configMembers.end(); i++ ) { 
+			    // we know we're up 
+			    if (i->h.isSelf()) {
+			        continue;
+			    }
+	
+			    BSONObj res;
+			    {
+			        bool ok = false;
+			        try {
+			            int theirVersion = -1000;
+			            ok = requestHeartbeat(myid, "", i->h.toString(), res, -1, theirVersion, false); 
+			            if( max >= theirVersion ) { 
+							max = theirVersion;
+						}
+					}
+					catch(DBException& e) { 
+						log() << "replSet cmufcc requestHeartbeat " << i->h.toString() << " : " << e.toString() << rsLog; 
+               		}
+               		catch(...) { 
+                   		log() << "replSet cmufcc error exception in requestHeartbeat?" << rsLog; 
+               		}
+				}
+			}
+
+			version = max > version ? max : version;
+			version++;
+
+			vector<BSONElement> members = config["members"].Array();
+			BSONObjBuilder update;
+			update.append("_id", id);
+			update.append("version", version);
+			BSONArrayBuilder newMember(update.subarrayStart("members"));
+			double maxPr = 1;
+			for (vector<BSONElement>::iterator it = members.begin(); it != members.end(); it++)
+			{
+				BSONObj hostObj = (*it).Obj();
+				cout << "[MYCODE] ReplSetAdd MEMBER:" << hostObj.toString() << endl;
+				newMember.append(*it);
+
+				if (hostObj["priority"].ok() && maxPr < hostObj["priority"].Double())
+					maxPr = hostObj["priority"].Double();
+			}
+
+			if (wantPrimary)
+				newMember.append(BSON("host" << addedHost << "_id" << addedHostID << "priority" << maxPr + 1));
+			else
+				newMember.append(BSON("host" << addedHost << "_id" << addedHostID));
+
+			newMember.done();
+			BSONObj updateObj = update.done();
+			printf("[MYCODE] ReplSetAdd UPDATE: %s\n", updateObj.toString().c_str());
+
+			try
+			{
+                scoped_ptr<ReplSetConfig> newConfig
+                        (ReplSetConfig::make(updateObj, true));
+
+                log() << "replSet replSetReconfig config object parses ok, " <<
+                        newConfig->members.size() << " members specified" << rsLog;
+
+                if( !ReplSetConfig::legalChange(theReplSet->getConfig(), *newConfig, errmsg) ) {
+                    return false;
+                }
+
+                checkMembersUpForConfigChange(*newConfig, result, false);
+
+                log() << "replSet replSetReconfig [2]" << rsLog;
+
+                theReplSet->haveNewConfig(*newConfig, true);
+                ReplSet::startupStatusMsg.set("replSetReconfig'd");	
+			}
+			catch(DBException &e) {
+				cout << "[MYCODE] ReplSetRemove Trying to remove the host" << addedHost << "threw exception: " << e.toString() << endl;
+			}
+
+			cout << "[MYCODE] Replica Set Current Version:" << theReplSet->config().version << " Local Computed Version:" << version << endl;
+
+			BSONObj cmd = BSON("replSetReconfig" << updateObj << "force" << true);
+
+			BSONObj info;
+			for( vector<ReplSetConfig::MemberCfg>::const_iterator i = configMembers.begin(); i != configMembers.end(); i++ ) { 
+			
+				string hostStr = i->h.toString();
+				cout << "[MYCODE] Sending replSetReconfig to Host:" << hostStr << endl;
+
+				if (i->h.isSelf())
+					continue;
+				
+				scoped_ptr<ScopedDbConnection> conn(
+					ScopedDbConnection::getInternalScopedDbConnection(hostStr));
+
+				try
+				{
+					if (!conn->get()->runCommand("admin", cmd, info, 0))
+					{
+						cout << "[MYCODE] ReplSetAdd failed to reconfigure the replica set\n";
+					}
+
+					string errmsg = conn->get()->getLastError();
+					cout << "[MYCODE] ReplSetAdd Error:" << errmsg << endl;
+				}
+				catch(DBException &e) {
+					cout << "[MYCODE] ReplSetAdd Trying to add the host " << addedHost << " threw exception: " << e.toString() << endl;
+				}
+
+				conn->done();
+			}
+           
+			scoped_ptr<ScopedDbConnection> hostConn(
+				ScopedDbConnection::getInternalScopedDbConnection(addedHost));
+			try
+			{
+				if (!hostConn->get()->runCommand("admin", cmd, info, 0))
+				{
+					cout << "[MYCODE] ReplSetAdd failed to reconfigure the replica set\n";
+				}
+
+				string errmsg = hostConn->get()->getLastError();
+				cout << "[MYCODE] ReplSetAdd Error:" << errmsg << endl;
+				if (wantPrimary)
+				{
+		           	theReplSet->stepDown(120);
+					hostConn->get()->runCommand("admin", BSON("replSetLeader" << 1 << "priority" << maxPr + 1), info, 0);
+				}
+			}
+			catch(DBException &e) {
+				cout << "[MYCODE] ReplSetAdd Trying to add the host " << addedHost << " threw exception: " << e.toString() << endl;
+			}
+			hostConn->done();
+
+            return true;
+        }
+    } cmdReplSetAdd;*/
 
     class CmdReplayOplog : public ReplSetCommand {
     private:
@@ -709,7 +882,8 @@ namespace mongo {
 
             //declare the arguments we want
             string ns;                                          //namespace
-            OpTime startTime;                                   //time from which oplog needs to be replayed        
+            OpTime startTime;                                   //time from which oplog needs to be replayed
+            OpTime endTime;                                      //time from which oplog needs to be replayed        
             string primary;                               	    //the primary to connect to (for oplog details)
             int shardID;                                        //the id for this shard
             bool replayAllOps;                                  //replay all the ops or not
@@ -724,18 +898,18 @@ namespace mongo {
             //do some checks to see we have all the info we require
             //also extract the arguments in the same call
             if( !checkAndExtractArgs(oplogParams, errmsg,
-                                        ns, startTime, primary, shardID, numChunks, replayAllOps,
+                                        ns, startTime, endTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas)) {
                 success = false;
             } else {
 
-                printExtractedArgs(ns, startTime, primary, shardID, numChunks, replayAllOps,
+                printExtractedArgs(ns, startTime, endTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas);
 
                 //replay the oplog
-                success =  replayOplog(errmsg, ns, startTime, primary, shardID, numChunks, replayAllOps,
+                success =  replayOplog(errmsg, ns, startTime, endTime, primary, shardID, numChunks, replayAllOps,
                                         proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas);
             }
@@ -752,7 +926,7 @@ namespace mongo {
             return success;
         }
 
-        bool replayOplog(string& errmsg, string ns, OpTime& startTime, string primary, int shardID, int numChunks, bool replayAllOps,
+        bool replayOplog(string& errmsg, string ns, OpTime& startTime, OpTime& endTime, string primary, int shardID, int numChunks, bool replayAllOps,
                                     BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax, 
                                     vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
 
@@ -766,7 +940,7 @@ namespace mongo {
             for(int i = 0; i < iterations; i++) {
                 printLogID();
                 cout<<"Executing iteration of replayOnce: " << i <<endl;
-                if( replayOnce(errmsg, done, prevlastOp, startTime, ns, primary, shardID, numChunks, replayAllOps,
+                if( replayOnce(errmsg, done, prevlastOp, startTime, endTime, ns, primary, shardID, numChunks, replayAllOps,
                                     proposedKey, globalMin, globalMax,
                                     splitPoints, assignments, removedReplicas)) {
                     if(done) { //if replay once succeded and done is true, there were no more ops to replay
@@ -804,7 +978,7 @@ namespace mongo {
             cout<<"[MYCODE_HOLLA] ";
         }
 
-        void printExtractedArgs(string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
+        void printExtractedArgs(string& ns, OpTime& startTime, OpTime& endTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
                                     BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
                                     vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             printLogID();
@@ -819,6 +993,10 @@ namespace mongo {
             cout<<"Num chunks: "<<numChunks<<endl;
             printLogID();
             cout<<"Get all ops: "<<replayAllOps<<endl;
+            if(replayAllOps){
+                printLogID();
+                cout<<"End time is: "<<endTime.toString()<<endl;
+            }
             printLogID();
             cout<<"Proposed key: "<<proposedKey.toString()<<endl;
             printLogID();
@@ -846,7 +1024,7 @@ namespace mongo {
         }
 
         bool checkAndExtractArgs(BSONObj oplogParams, string& errmsg,
-                                    string& ns, OpTime& startTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
+                                    string& ns, OpTime& startTime, OpTime& endTime, string& primary, int& shardID, int& numChunks, bool& replayAllOps,
                                     BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
                                     vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
             //printLogID();
@@ -898,6 +1076,15 @@ namespace mongo {
 
             //get all ops or not
             replayAllOps = oplogParams["replayAllOps"].Bool();
+
+            if(replayAllOps) {
+                //end time
+                endTime = oplogParams["endTime"]._opTime();
+                if (endTime.isNull()) {
+                    errmsg = "no end time";
+                    return false;
+                }
+            }
 
             //printLogID();
             //cout<<"numChunks done"<<endl;
@@ -963,7 +1150,7 @@ namespace mongo {
             return true;
         }
 
-        bool replayOnce(string& errmsg, bool& done, BSONObj& prevlastOp, OpTime& startTime, string ns, string primary, 
+        bool replayOnce(string& errmsg, bool& done, BSONObj& prevlastOp, OpTime& startTime, OpTime& endTime, string ns, string primary, 
                                     int shardID, int numChunks, bool replayAllOps,
                                     BSONObj proposedKey, BSONObj globalMin, BSONObj globalMax,
                                     vector<BSONObj> splitPoints, vector<int> assignments, vector<string> removedReplicas) {
@@ -975,7 +1162,7 @@ namespace mongo {
             //get all the ops that need to be replayed
             vector<BSONObj> opsToReplay;
             BSONObj lastOp = BSONObj();
-            success = getOpsToReplay(errmsg, lastOp, startTime, ns, primary, opsToReplay, replayAllOps);
+            success = getOpsToReplay(errmsg, lastOp, startTime, endTime, ns, primary, opsToReplay, replayAllOps);
 
             if(success) {
                 printLogID();
@@ -1004,7 +1191,7 @@ namespace mongo {
             return success;
         }
 
-        bool getOpsToReplay(string& errmsg, BSONObj& lastOp, OpTime& startTime, string ns, string primary, vector<BSONObj>& opsToReplay, bool replayAllOps) {
+        bool getOpsToReplay(string& errmsg, BSONObj& lastOp, OpTime& startTime, OpTime& endTime, string ns, string primary, vector<BSONObj>& opsToReplay, bool replayAllOps) {
             BSONObj info;       //return info
             
             int cap = 100;      //number of oplogs we will get to replay per round will be <= cap if 'replayAllOps' is not true
@@ -1038,7 +1225,9 @@ namespace mongo {
                     lastOp = queryResult.copy();
 
                     //bail out if we reached the cap and 'replayAllOps' is not true
-                    if(!replayAllOps && (int)opsToReplay.size() >= cap) {
+                    if(replayAllOps && startTime > endTime) {
+                        break;
+                    } else if(!replayAllOps && (int)opsToReplay.size() >= cap) {
                         break;
                     }
                     

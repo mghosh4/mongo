@@ -1229,18 +1229,24 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, false);
+                            errmsg, false, currTSVector);
 
 				// 3. Write Throttle
 				log() << "[MYCODE_TIME] Throttling Writes" << endl;
 				replicaThrottle(ns, numShards, primary, true);
 
                 // 4. Oplog Replay again
+                OpTime endTS[numShards]; 
+                checkTimestamp(primary, numShards, endTS);
+
+                //conversion from array to vector
+                vector<OpTime> endTSVector(endTS, endTS + numShards);
+                
                 log() << "[MYCODE_TIME] Replaying Oplog again" << endl;
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, true);
+                            errmsg, true, endTSVector );
 
 
 				if (configUpdate)
@@ -1264,11 +1270,11 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
             bool replayOplog(const string ns, BSONObj proposedKey, BSONObjSet splitPoints,  
                                 int numShards, string primary[], string removedReplicas[], vector<OpTime>& startTS,
                                 int numChunks,  int assignments[], 
-                                string& errmsg, bool replayAllOps) {
+                                string& errmsg, bool replayAllOps, vector<OpTime>& endTS) {
                 //success variable
                 bool success = true;
 
-                cout<<"[MYCODE_HOLLA] ==== In test replay ==== "<<endl;
+                cout<<"[MYCODE_HOLLA] ==== In replyOplog ==== "<<endl;
 
                 //global min and max (positive and negative infinities)
                 BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
@@ -1306,6 +1312,10 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                     params.append("assignments", assignmentsVector);                    //the new assignments for chunks
                     params.append("removedReplicas", removedReplicasVector);            //the other removed replicas
                     params.append("replayAllOps", replayAllOps);                        //replay all ops or not (if false, caps ops to replay which might or might not cover all ops)
+
+                    if(replayAllOps){
+                        params.append("endTime", endTS[i]);                              //if replayAllOps is true then we need a time till when we want to replay
+                    }
 
                     //create an object to encapsulate all the params
                     BSONObj oplogParams = params.obj();                 
@@ -1848,7 +1858,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 					for (int j = 0; j < numShards; j++)
 						datainkr[i][j] = 0;
 
-                collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
+                //collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
 
                 delete[] datainkr;
 			}
@@ -1992,14 +2002,15 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 						startTS[i] = lastOpTS;
 						oplogReader.resetConnection();
 					}
-                                  stopThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleStop, this, primary[i], removedReplicas[i]))));
+
+                   stopThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleStop, this, primary[i], removedReplicas[i], ns))));
                 }
 
 				for (unsigned i = 0; i < stopThreads.size(); i++) 
 					stopThreads[i]->join();
             }
 
-            void singleStop(string primary, string removedReplica)
+            /*void singleStop(string primary, string removedReplica)
             {
 				BSONObj info;
                 scoped_ptr<ScopedDbConnection> conn(
@@ -2009,6 +2020,24 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 try
 				{
 					conn->get()->runCommand("admin", BSON("replSetRemove" << removedReplica), info);
+				}
+				catch(DBException e){
+					cout << "[MYCODE] stepping down" << " threw exception: " << e.toString() << endl;
+				}
+
+				conn->done();
+			}*/
+
+            void singleStop(string primary, string removedReplica, string ns)
+            {
+				BSONObj info;
+                scoped_ptr<ScopedDbConnection> conn(
+                	ScopedDbConnection::getScopedDbConnection(
+                       	removedReplica ) );
+                
+                try
+				{
+					conn->get()->runCommand("admin", BSON("replSetWriteThrottle" << "local.oplogthrottle" << "namespace" << ns << "throttle" << true), info);
 				}
 				catch(DBException e){
 					cout << "[MYCODE] stepping down" << " threw exception: " << e.toString() << endl;
@@ -2042,20 +2071,23 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 
 					verify(hostID != -1);
 
-                    returnThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleReturn, this, primary[i], removedReplicas[i], makePrimary, hostID))));
+                    returnThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleReturn, this, primary[i], removedReplicas[i], ns, makePrimary, hostID))));
                 }
 
 				for (unsigned i = 0; i < returnThreads.size(); i++) 
 					returnThreads[i]->join();
             }
 
-            void singleReturn(string primary, string removedReplica, bool makePrimary, int hostID)
+            void singleReturn(string primary, string removedReplica, string ns, bool makePrimary, int hostID)
             {
 				BSONObj info;
                 scoped_ptr<ScopedDbConnection> conn(
                 	ScopedDbConnection::getScopedDbConnection(
                        	primary ) );
 
+                scoped_ptr<ScopedDbConnection> hostConn(
+                	ScopedDbConnection::getScopedDbConnection(
+                       	removedReplica ) );
 				try
 				{
 					conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
@@ -2066,7 +2098,18 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 					cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
 				}
 
+				try
+				{
+					hostConn->get()->runCommand("admin", BSON("replSetWriteThrottle" << "local.oplogthrottle" << "namespace" << ns << "throttle" << false), info);
+					string errmsg = hostConn->get()->getLastError();
+					cout << "[MYCODE] Write Throttle:" << errmsg << endl;
+				}
+				catch(DBException e){
+					cout << "[MYCODE] oplog throttle replica" << " threw exception: " << e.toString() << endl;
+				}
+
 				conn->done();
+                hostConn->done();
 			}
 
 			void replicaThrottle(const string ns, int numShards, string primary[], bool throttle)
@@ -2077,14 +2120,14 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 				{
 					printf("[MYCODE] MYCUSTOMPRINT: %s going to send throttle write command\n", primary[i].c_str());
 
-                    throttleThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleThrottle, this, primary[i], throttle))));
+                    throttleThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleThrottle, this, primary[i], ns, throttle))));
                 }
 
 				for (unsigned i = 0; i < throttleThreads.size(); i++) 
 					throttleThreads[i]->join();
             }
 
-            void singleThrottle(string primary, bool throttle)
+            void singleThrottle(string primary, string ns, bool throttle)
             {
 				BSONObj info;
                 scoped_ptr<ScopedDbConnection> conn(
@@ -2093,7 +2136,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 
 				try
 				{
-					conn->get()->runCommand("admin", BSON("replSetWriteThrottle" << 1 << "throttle" << throttle), info);
+					conn->get()->runCommand("admin", BSON("replSetWriteThrottle" << "local.writethrottle" << "namespace" << ns << "throttle" << throttle), info);
 					string errmsg = conn->get()->getLastError();
 					cout << "[MYCODE] Replica Return:" << errmsg << endl;
 				}

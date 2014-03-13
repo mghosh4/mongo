@@ -64,6 +64,53 @@ namespace mongo {
         //uassert(13288, "replSet error write op to db before replSet initialized", str::startsWith(ns, "local.") || *opstr == 'n');
     }
 
+    bool isLoggingMuted(const string ns)
+    {
+        const string rsSettingNS = "local.oplogthrottle";
+        DBDirectClient cli;
+        BSONObj throttleObj, o;
+        bool flag = false;
+        if (cli.exists(rsSettingNS))
+        {
+            log() << "[MYCODE] Checking for throttle value" << endl;
+            try
+            {
+                scoped_ptr<DBClientCursor> cursor(cli.query( rsSettingNS, Query() ));
+                while (cursor->more())
+                {
+                    o = cursor->next().getOwned();
+                    if (!ns.compare(o["_id"].String()))
+                    {
+                        flag = true;
+                        break;
+                    }
+                }
+
+                if (flag)
+                    throttleObj = o["stopped"].wrap();
+                else
+                    return false;
+            }
+            catch (DBException e)
+            {
+                log() << "[MYCODE] dbexception: findOne call failed for " << rsSettingNS << endl;
+            }
+
+            log() << "[MYCODE] Throttle value: " << throttleObj.toString() << endl;
+            if (!throttleObj["stopped"].eoo())
+            {
+                log() << "[MYCODE] Checking for stopped value" << endl;
+                bool stopped = throttleObj["stopped"].Bool();
+                if (stopped)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     /** write an op to the oplog that is already built.
         todo : make _logOpRS() call this so we don't repeat ourself?
         */
@@ -84,9 +131,12 @@ namespace mongo {
             }
             Client::Context ctx(logns , localDB);
             {
-                int len = op.objsize();
-                Record *r = theDataFileMgr.fast_oplog_insert(rsOplogDetails, logns, len);
-                memcpy(getDur().writingPtr(r->data(), len), op.objdata(), len);
+                const char *ns = op.getStringField("ns");
+                if(!isLoggingMuted(ns)) { //don't log if oplog for this ns is muted, but don't touch the sync update time
+                    int len = op.objsize();
+                    Record *r = theDataFileMgr.fast_oplog_insert(rsOplogDetails, logns, len);
+                    memcpy(getDur().writingPtr(r->data(), len), op.objdata(), len);
+                }
             }
             /* todo: now() has code to handle clock skew.  but if the skew server to server is large it will get unhappy.
                      this code (or code in now() maybe) should be improved.
