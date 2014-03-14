@@ -989,8 +989,7 @@ namespace mongo {
 					log() << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
                     scoped_ptr<ScopedDbConnection> shardconn(
                     	ScopedDbConnection::getScopedDbConnection(
-                           	shards[i].getConnString() ) );
-                    
+                           	shards[i].getConnString() ) )
                     
                     rowCount += shardconn->get()->count(ns);
                     shardconn->done();
@@ -1015,7 +1014,7 @@ namespace mongo {
 
                 log() << "[MYCODE_TIME] Balancer Turned off\tmillis:" << t.millis() << endl;
 
-				// 3. create replica sets
+				// 3. create replica sets and collect replica ids
                 scoped_ptr<ScopedDbConnection> shardconn(
                 	ScopedDbConnection::getScopedDbConnection(
                        	shards[0].getConnString() ) );
@@ -1138,11 +1137,9 @@ namespace mongo {
 					replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, false);
 				}
 
-
 				log() << "[MYCODE_TIME] End of Secondary ISOLATION\tmillis:" << t.millis() << endl;
 
 				log() << "[MYCODE_TIME] Reconfiguring secondary set of replicas" << endl;
-
 				for (int j = 1; j < numHosts; j++)
 				{
 					cout << "[MYCODE] Reconfiguring replicas:";
@@ -1168,9 +1165,7 @@ namespace mongo {
 				delete[] replicaSets;
 
 				delete[] datainkr;
-
 				log() << "[MYCODE_TIME] End of Secondary Reconfigure\tmillis:" << t.millis() << endl;
-
 
                 // 9. Enabling the balancer
                 setBalancerState(true);
@@ -1184,7 +1179,7 @@ namespace mongo {
 
             void setBalancerState(bool state)
             {
-scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
+		scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
                         configServer.getPrimary().getConnString() ) );
 
 				//2. Disable the balancer
@@ -1203,10 +1198,6 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 conn1->done();
             }
 
-			
-			
-			
-
             void pickSplitVector( BSONObjSet& splitPoints, const string ns, BSONObj shardKey, BSONObj min, BSONObj max, int chunkSize /* bytes */, int maxPoints, int maxObjs ) const {
                 // Ask the mongod holding this chunk to figure out the split points.
                 vector<Shard> newShards;
@@ -1219,7 +1210,6 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                     log() << "[MYCODE] Pick split Vector\n";
                     scoped_ptr<ScopedDbConnection> conn(
                             ScopedDbConnection::getInternalScopedDbConnection( newShards[i].getConnString() ) );
-                    
                     BSONObj result;
                     BSONObjBuilder cmd;
                     cmd.append( "splitVector" , ns );
@@ -1247,20 +1237,16 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 }
             }
 
-
 			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[],Timer t, bool multithread, long long **datainkr)
-
 			{
                 int numShards = shards.size();
 				int numChunk = splitPoints.size() + 1;
 
 				// 1. Chunk Migration
-
 				log() << "[MYCODE_TIME] Migrating Chunk\tmillis:" << t.millis() << endl;
 				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas,multithread,datainkr);
 				log() << "[MYCODE_TIME] End Migrating Chunk\tmillis:" << t.millis() << endl;
 				log() << "[MYCODE_TIME] End EXECUTION Phase\tmillis:" << t.millis() << endl;
-
 
                 //conversion from array to vector
                 vector<OpTime> currTSVector(currTS, currTS + numShards);
@@ -1290,7 +1276,6 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                             numChunk, assignment, 
                             errmsg, true, endTSVector );
 				log() << "[MYCODE_TIME] End RECOVERY Phase\tmillis:" << t.millis() << endl;
-
 
 				if (configUpdate)
 				{
@@ -1501,9 +1486,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 				}
 			}
 
-
 			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
-
 			{
 				printf("[MYCODE] RUNALGORITHM\n");
 				
@@ -1577,6 +1560,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 delete[] newdatainkr;
                 delete algo;
 			}
+			
             void collectData(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, long long **datainkr)
             {
 			    const char *key = proposedKey.firstElement().fieldName();
@@ -1889,7 +1873,6 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 					cout << "[MYCODE] Caught exception while moving data:" << e.what() << endl;
 				}
 
-
 				toconn->done();
 				fromconn->done();
 			}
@@ -1914,7 +1897,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 						oplogReader.resetConnection();
 					}
 
-                   stopThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleStop, this, primary[i], removedReplicas[i], ns))));
+                    stopThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleStop, this, primary[i], removedReplicas[i], ns))));
                 }
 
 				for (unsigned i = 0; i < stopThreads.size(); i++) 
