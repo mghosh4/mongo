@@ -17,6 +17,7 @@
 #include "pch.h"
 
 #include <boost/thread/thread.hpp>
+#include <limits.h>
 #include "mongo/db/commands.h"
 
 #include "mongo/client/connpool.h"
@@ -1066,6 +1067,15 @@ namespace mongo {
 				log() << "[MYCODE] Stopping first set of hosts" << endl;
 				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
 
+				long long **datainkr;
+                		datainkr = new long long*[numChunk];
+				for (int i = 0; i < numChunk; i++)
+                    			datainkr[i] = new long long[numShards];
+
+				for (int i = 0; i < numChunk; i++)
+					for (int j = 0; j < numShards; j++)
+						datainkr[i][j] = 0;
+
 				// 5. Run the algorithm
 				log() << "[MYCODE_TIME] Running the algorithm" << endl;
 				int assignment[numChunk];
@@ -1075,12 +1085,12 @@ namespace mongo {
                                 log() << "[WWT] multithread = " << multithread << endl;
 
                                 if(loadBalance)
-                                    runLBAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
+                                    runLBAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment,datainkr);
                                 else
-				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
+				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
 
 				log() << "[MYCODE] Reconfiguring first set of hosts" << endl;
-				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment,multithread);
+				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment,multithread,datainkr);
                                 log() << "[WWT] Reconfiguring first set of hosts takes" << t.millis()<<endl;
 				if (!success)
 				{
@@ -1124,7 +1134,7 @@ namespace mongo {
 					cout << endl;
 
                                   // 8. Reconfiguring the secondary replicas
-					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment,multithread);
+					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment,multithread,datainkr);
 					log() << "[WWT] Reconfiguring secondary set of hosts takes" << t.millis()<<endl;
 					if (!success)
 					{
@@ -1135,7 +1145,7 @@ namespace mongo {
 				}
 				
 				delete[] replicaSets;
-
+				delete[] datainkr;
                 // 9. Enabling the balancer
                 setBalancerState(true);
 
@@ -1212,14 +1222,14 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 }
             }
 
-			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[],bool multithread)
+			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[],bool multithread, long long **datainkr)
 			{
                 int numShards = shards.size();
 				int numChunk = splitPoints.size() + 1;
 
 				// 1. Chunk Migration
 				log() << "[MYCODE_TIME] Migrating Chunk" << endl;
-				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas,multithread);
+				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas,multithread,datainkr);
 
                 //conversion from array to vector
                 vector<OpTime> currTSVector(currTS, currTS + numShards);
@@ -1556,17 +1566,10 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 			}*/
 
     
-			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
+			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
 			{
 				printf("[MYCODE] RUNALGORITHM\n");
-				long long **datainkr;
-                datainkr = new long long*[numChunk];
-				for (int i = 0; i < numChunk; i++)
-                    datainkr[i] = new long long[numShards];
-
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-						datainkr[i][j] = 0;
+				
 
                 collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
 
@@ -1589,19 +1592,12 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 					cout << assignment[i] << "\t";
 				cout << "\n";
 
-                delete[] datainkr;
+                
 			}
-                        void runLBAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
+                        void runLBAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
 			{
 				printf("[WWT] RUN-LOADBALANCE-ALGORITHM\n");
-				long long **datainkr;
-                datainkr = new long long*[numChunk];
-				for (int i = 0; i < numChunk; i++)
-                    datainkr[i] = new long long[numShards];
-
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-						datainkr[i][j] = 0;
+				
 
                 collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
                 int chunkpershard = (int)ceil((double)numChunk/numShards);
@@ -1640,7 +1636,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 					cout << assignment[i] << "\t";
 				cout << "\n";
 
-                delete[] datainkr;
+                
                 delete[] newdatainkr;
                 delete algo;
 			}
@@ -1766,7 +1762,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 
             }
 
-			void migrateChunk(const string ns, BSONObj proposedKey, BSONObjSet splitPoints, int numChunk, int assignment[], vector<Shard> shards, string removedReplicas[],bool multithread)
+			void migrateChunk(const string ns, BSONObj proposedKey, BSONObjSet splitPoints, int numChunk, int assignment[], vector<Shard> shards, string removedReplicas[],bool multithread,long long **datainkr)
 			{
                 vector<Shard> newShards;
                 Shard primary = grid.getDBConfig(ns)->getPrimary();
@@ -1787,6 +1783,18 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 						}
 					}
 				}*/
+		long long minData = LLONG_MAX;
+		for (int i = 0; i < numChunk; i++){
+			for (int j = 0; j < numShards; j++){
+				log() << datainkr[i][j]<<"\t";
+				if( minData > datainkr[i][j] && datainkr[i][j]!=0){
+					log() <<"min Change from = " <<minData<<endl;
+					minData = datainkr[i][j];
+				}
+			}
+			log() <<endl;
+		}
+		log()<<"[WWT] min Migrated Data size = " <<minData <<endl;
 
 				vector<shared_ptr<boost::thread> > migrateThreads;
 
@@ -1829,11 +1837,12 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 							
 							if (sourceCount > 0)
 							{
+								int xy[2] = {i,j};
                                                                 cout << "[WWT] Min:" << min.toString() << endl;
                 						cout << "[WWT] Max:" << max.toString() << endl;
 								migrateThreads.push_back(shared_ptr<boost::thread>(
 
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range,  i, j, assignment, ns,multithread))));
+									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,minData))));
 							}
 						}
 					}
@@ -1848,7 +1857,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 				for (unsigned i = 0; i < migrateThreads.size(); i++) {
 					migrateThreads[i]->join();
 				}
-
+/*
 				long long **datainkr;
                 datainkr = new long long*[numChunk];
 				for (int i = 0; i < numChunk; i++)
@@ -1861,17 +1870,18 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 //collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
 
                 delete[] datainkr;
+*/
 			}
 
-			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int i, int j, int assignment[], const string ns, bool multithread)
+			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,long long minData)
 			{
                 //bool multithread = true;
                 const char *key = proposedKey.firstElement().fieldName();
 		BSONObj res;
                 BSONObj min ,max; 
                 getMinMaxAsBSON(range,proposedKey, min, max);
-                
-                
+                int i= xy[0];
+		int j= xy[1];
                 scoped_ptr<ScopedDbConnection> toconn(
                		ScopedDbConnection::getScopedDbConnection(
                  		removedreplicas[assignment[i]] ) );
@@ -1929,6 +1939,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 							"min"<<min<<
                                                         "max"<<max<<
       							"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
+							"splitPoints"<<(int)round(((double) sourceCount)/minData)<<
       							"shardId" << Chunk::genID(ns, minID) << 
       							"configdb" << configServer.modelServer() << 
       							"secondaryThrottle" << true <<

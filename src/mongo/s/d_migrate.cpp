@@ -1615,7 +1615,8 @@ namespace mongo {
 
              	BSONObj min = cmdObj.getObjectField( "min" );
              	BSONObj max = cmdObj.getObjectField( "max" );
-             	int subChunk = 10;
+             	int subChunk = cmdObj["splitPoints"].Int();
+		log() << "[WWT] subChunk = " <<subChunk<<endl;
              	scoped_ptr<ScopedDbConnection> conn(
                             ScopedDbConnection::getInternalScopedDbConnection(from));
              	BSONObj splitResult;
@@ -1671,7 +1672,7 @@ namespace mongo {
 			// Insert all the data within the range in this shard
             	vector<shared_ptr<boost::thread> > migrateThreads;
             	BSONObjSet::iterator range_ptr = rangeSet.begin();
-            	int requestThread = 10;
+            	int requestThread = subChunk;
                 int localFinishedThread = 0;
                 
 		int concurrentThread = 0;
@@ -1703,8 +1704,11 @@ namespace mongo {
                         log()<<"[WWT] concurrentThread = "<<concurrentThread<<endl;
                         while(true){
 			     log()<<"[WWT] begin the check localFinishedThread = "<<localFinishedThread<<endl;
+			     finish_mx_.lock();
+                             localFinishedThread = globalFinishedThread;
+                             finish_mx_.unlock();
                              while(localFinishedThread==0){
-                             	
+
                                 log()<<"[WWT] sleeping for 1 s"<<endl;
                                 boost::this_thread::sleep(boost::posix_time::seconds(1));
                                 finish_mx_.lock();
