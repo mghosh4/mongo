@@ -59,11 +59,6 @@ namespace mongo {
             return false;
         }
         
-        
-        if ( _doHandshake /*&& ! replHandshake(_conn.get() )*/ ) {
-            return false;
-        }
-
         return true;
     }
 
