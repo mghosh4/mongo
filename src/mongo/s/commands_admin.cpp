@@ -1105,7 +1105,7 @@ namespace mongo {
 				log() << "[MYCODE_TIME] Reconfiguring first set of hosts" << endl;
 
 				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment, t);
->>>>>>> upstream/master
+
 				if (!success)
 				{
 					delete[] replicaSets;
