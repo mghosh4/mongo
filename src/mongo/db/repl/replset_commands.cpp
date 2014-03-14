@@ -1201,7 +1201,10 @@ namespace mongo {
             //connect to primary
             try {
 
-                oplogReader.connect(primary);
+                while(!oplogReader.connect(primary))
+                {
+                    cout << "[MYCODE] Oplog Reader connection failed" << endl;
+                }
 
                 if(oplogReader.haveCursor()) {
                     oplogReader.resetCursor();

@@ -973,7 +973,7 @@ namespace mongo {
 		        conn->done();
 
                 // 1. Calculate the splits for the new shard key
-                log() << "[MYCODE_TIME] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\n";
+                log() << "[MYCODE_TIME] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\tmillis:" << t.millis() << "\n";
                 BSONObjSet splitPoints; 
                 int numChunk = manager->numChunks();
 
@@ -1005,12 +1005,12 @@ namespace mongo {
                 for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
                     log() << "[MYCODE] Split Points:" << it->toString() << endl;
 
-                log() << "[MYCODE_TIME] Split Points Done" << endl;
+                log() << "[MYCODE_TIME] Split Points Done\tmillis:" << t.millis() << endl;
 
                 // 2. Disable the balancer
                 setBalancerState(false);
 
-                log() << "[MYCODE_TIME] Balancer Turned off" << endl;
+                log() << "[MYCODE_TIME] Balancer Turned off\tmillis:" << t.millis() << endl;
 
 				// 3. create replica sets and collect replica ids
                 scoped_ptr<ScopedDbConnection> shardconn(
@@ -1035,7 +1035,7 @@ namespace mongo {
 				string **replicaSets = new string*[numHosts];
 				for (int i = 0; i < numHosts; i++)
 					replicaSets[i] = new string[numShards];
-				collectReplicas(ns, replicaSets, shards, numShards);
+				collectReplicas(replicaSets, shards, numShards);
 				log() << "[MYCODE_TIME] Replicas Collected" << endl;
 
 				map<string, int> hostIDMap;
@@ -1062,25 +1062,33 @@ namespace mongo {
                 // 4. Stopping the first set of replicas
 				OpTime currTS[numShards];
 
-				log() << "[MYCODE_TIME] Stopping first set of hosts" << endl;
+				log() << "[MYCODE_TIME] End of PREPARE Phase:\tmillis:" << t.millis() << endl;
 
+				log() << "[MYCODE_TIME] Stopping first set of hosts" << endl;
+                cout << "[MYCODE] Namespace:" << ns << endl;
 				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
+
+				log() << "[MYCODE_TIME] End of ISOLATION Phase:\tmillis:" << t.millis() << endl;
 
 				// 5. Run the algorithm
 				log() << "[MYCODE_TIME] Running the algorithm" << endl;
 				int assignment[numChunk];
 				runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
 
+				log() << "[MYCODE_TIME] End of Algorithm Phase:\tmillis:" << t.millis() << endl;
+
                 // 6. Reconfiguring the first set of replicas
 				log() << "[MYCODE_TIME] Reconfiguring first set of hosts" << endl;
 
-				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment);
+				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment, t);
 				if (!success)
 				{
 				    delete[] replicaSets;
                     setBalancerState(true);
 					return false;
 				}
+
+				log() << "[MYCODE_TIME] End of Primary Reconfiguration:\tmillis:" << t.millis() << endl;
 
 				log() << "[MYCODE_TIME] Checking Timestamp before starting secondaries" << endl;
 
@@ -1105,6 +1113,8 @@ namespace mongo {
 					replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, false);
 				}
 
+				log() << "[MYCODE_TIME] End of Secondary ISOLATION\tmillis:" << t.millis() << endl;
+
 				log() << "[MYCODE_TIME] Reconfiguring secondary set of replicas" << endl;
 				for (int j = 1; j < numHosts; j++)
 				{
@@ -1117,7 +1127,7 @@ namespace mongo {
 					cout << endl;
 
                     // 8. Reconfiguring the secondary replicas
-					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment);
+					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment, t);
 					if (!success)
 					{
 				        delete[] replicaSets;
@@ -1128,12 +1138,14 @@ namespace mongo {
 				
 				delete[] replicaSets;
 
+				log() << "[MYCODE_TIME] End of Secondary Reconfigure\tmillis:" << t.millis() << endl;
+
                 // 9. Enabling the balancer
                 setBalancerState(true);
 
-				result.append("millis", t.millis());
+				log() << "[MYCODE_TIME] Resharding Complete\tmillis:" << t.millis() << endl;
 
-				log() << "[MYCODE_TIME] Resharding Complete" << endl;
+				result.append("millis", t.millis());
 
 				return true;
 			}
@@ -1164,12 +1176,11 @@ namespace mongo {
                 vector<Shard> newShards;
                 Shard newprimary = grid.getDBConfig(ns)->getPrimary();
                 newprimary.getAllShards( newShards );
-                int numShards = newShards.size();
+                int numShards = 1;
 
                 for (int i = 0; i < numShards; i++)
                 {
                     log() << "[MYCODE] Pick split Vector\n";
-                    DBConfigPtr config = grid.getDBConfig( ns , false );
                     scoped_ptr<ScopedDbConnection> conn(
                             ScopedDbConnection::getInternalScopedDbConnection( newShards[i].getConnString() ) );
                     BSONObj result;
@@ -1199,14 +1210,16 @@ namespace mongo {
                 }
             }
 
-			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[])
+			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[], Timer t)
 			{
                 int numShards = shards.size();
 				int numChunk = splitPoints.size() + 1;
 
 				// 1. Chunk Migration
-				log() << "[MYCODE_TIME] Migrating Chunk" << endl;
+				log() << "[MYCODE_TIME] Migrating Chunk\tmillis:" << t.millis() << endl;
 				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
+				log() << "[MYCODE_TIME] End Migrating Chunk\tmillis:" << t.millis() << endl;
+				log() << "[MYCODE_TIME] End EXECUTION Phase\tmillis:" << t.millis() << endl;
 
                 //conversion from array to vector
                 vector<OpTime> currTSVector(currTS, currTS + numShards);
@@ -1217,6 +1230,7 @@ namespace mongo {
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
                             errmsg, false, currTSVector);
+				log() << "[MYCODE_TIME] End First Oplog Replay\tmillis:" << t.millis() << endl;
 
 				// 3. Write Throttle
 				log() << "[MYCODE_TIME] Throttling Writes" << endl;
@@ -1234,6 +1248,7 @@ namespace mongo {
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
                             errmsg, true, endTSVector );
+				log() << "[MYCODE_TIME] End RECOVERY Phase\tmillis:" << t.millis() << endl;
 
 				if (configUpdate)
 				{
@@ -1249,6 +1264,7 @@ namespace mongo {
 				// 7. Write UnThrottle
 				log() << "[MYCODE_TIME] UnThrottling Writes" << endl;
 				replicaThrottle(ns, numShards, primary, false);
+				log() << "[MYCODE_TIME] End COMMIT Phase\tmillis:" << t.millis() << endl;
 
                 return true;
             }
@@ -1369,7 +1385,7 @@ namespace mongo {
                 conn->done();
             }
 
-			void collectReplicas(string ns, string** replicaSets, vector<Shard> newShards, int numShards)
+			void collectReplicas(string** replicaSets, vector<Shard> newShards, int numShards)
 			{
 				BSONObj info;
 				int hostNum;
@@ -1431,7 +1447,10 @@ namespace mongo {
 				BSONObj info;
 				for (int i = 0; i < numShards; i++)
 				{
-					oplogReader.connect(shards[i]);
+					while(!oplogReader.connect(shards[i]))
+                    {
+                        cout << "[MYCODE] Oplog Reader Connect Failed" << endl;
+                    }
 
 					BSONObj lastOp = oplogReader.getLastOp(rsoplog);
 					OpTime lastOpTS = lastOp["ts"]._opTime();
@@ -1440,107 +1459,6 @@ namespace mongo {
 					oplogReader.resetConnection();
 				}
 			}
-
-			/*void collectOplog(string ns, vector<Shard> shards, OpTime startTS[], vector<BSONObj>& allOps, string primary[])
-			{
-                int numShards = shards.size();
-
-				BSONObj info;
-				for (int i = 0; i < numShards; i++)
-				{
-					oplogReader.connect(primary[i]);
-
-					oplogReader.tailingQueryGTE(rsoplog, startTS[i]);
-					BSONObj o;
-					while (oplogReader.more())
-					{
-						o = oplogReader.next();
-						startTS[i] = o["ts"]._opTime();
-						printf("[MYCODE] OPLOG for Shard %d: %s\n", i, o.toString().c_str());
-
-						allOps.push_back(o);
-					}
-					oplogReader.resetConnection();
-				}
-			}
-
-			void oldReplayOplog(vector<BSONObj> allOps, BSONObj proposedKey, BSONObjSet splitPoints, int numChunk, int assignment[], string removedReplicas[])
-			{
-				const char *names[] = {"o", "ns", "op", "b"};
-				BSONElement fields[4];
-                BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
-                BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
-				for (vector<BSONObj>::iterator it = allOps.begin(); it != allOps.end(); it++)
-				{
-					it->getFields(4, names, fields);
-					cout << "[MYCODE] REPLAY:" << (*it).toString() << endl;
-					string name = fields[2].valuestrsafe();
-					const char *optype = name.c_str();
-					if (!(*optype == 'i' || *optype == 'd' || *optype == 'u'))
-						continue;
-
-					const string ns = fields[1].valuestrsafe();
-
-					BSONObj o;
-					if (*optype == 'i' || *optype == 'd')
-					{
-						BSONObj inter = fields[0].wrap();
-						o = inter["o"].Obj();
-					}
-					else if (*optype == 'u')
-						o = (*it)["o2"].Obj();
-
-					BSONObj value = o[proposedKey.firstElementFieldName()].Obj();
-					cout << "[MYCODE] REPLAY:" << o.toString() << " " << value.toString() << endl;
-
-					int i;
-					BSONObjSet::iterator it1 = splitPoints.begin();
-					BSONObj prev;
-					for (i = 0; i < numChunk; i++)
-					{
-                        BSONObj min = i > 0 ? prev : globalMin;
-                        BSONObj max = i == numChunk - 1 ? globalMax : *it1;
-
-						if ( min <= value && value < max)
-							break;
-						if ((i == 0 && value < (i + 1) * key2_range) ||
-							(i == numChunk - 1 && value >= i * key2_range) ||
-							(value >= i * key2_range && value < (i + 1) * key2_range))
-							break;
-
-						if (i < numChunk - 1)
-						{
-							prev = *it1;
-							it1++;
-						}
-					}
-
-					cout << "[MYCODE] Operation " << o.toString() << " going to shard " << removedReplicas[assignment[i]] << endl;
-                	scoped_ptr<ScopedDbConnection> conn(
-                		ScopedDbConnection::getScopedDbConnection(
-                        	removedReplicas[assignment[i]] ) );
-
-					int sourceCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
-
-					if (*optype == 'i')
-						conn->get()->insert(ns, o);
-					else if (*optype == 'u')
-					{
-						BSONObj update = fields[0].wrap();
-						conn->get()->update(ns, o, update, fields[3].booleanSafe());
-					}
-					else if (*optype == 'd')
-						conn->get()->remove(ns, o, fields[3].booleanSafe());
-
-					string errmsg = conn->get()->getLastError();
-					cout << "[MYCODE] Error:" << errmsg << endl;
-
-					int dstCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
-					cout << "[MYCODE] Source Count:" << sourceCount << " Dest Count:" << dstCount << endl;
-
-					conn->done();
-				}
-			}*/
 
 			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
 			{
@@ -1837,7 +1755,11 @@ namespace mongo {
 
 					if (collectTS)
 					{
-						oplogReader.connect(primary[i]);
+                        while(!oplogReader.connect(primary[i]))
+                        {
+                            cout << "[MYCODE] Oplog Reader Connect Failed" << endl;
+                        }
+
 						BSONObj lastOp = oplogReader.getLastOp(rsoplog);
 						OpTime lastOpTS = lastOp["ts"]._opTime();
 						startTS[i] = lastOpTS;
