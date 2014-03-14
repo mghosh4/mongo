@@ -1064,10 +1064,7 @@ namespace mongo {
 
                 // 4. Stopping the first set of replicas
 				OpTime currTS[numShards];
-				log() << "[MYCODE] Stopping first set of hosts" << endl;
-				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
 
-<<<<<<< HEAD
 				long long **datainkr;
                 		datainkr = new long long*[numChunk];
 				for (int i = 0; i < numChunk; i++)
@@ -1076,20 +1073,19 @@ namespace mongo {
 				for (int i = 0; i < numChunk; i++)
 					for (int j = 0; j < numShards; j++)
 						datainkr[i][j] = 0;
-=======
+
 				log() << "[MYCODE_TIME] End of PREPARE Phase:\tmillis:" << t.millis() << endl;
 
 				log() << "[MYCODE_TIME] Stopping first set of hosts" << endl;
                 cout << "[MYCODE] Namespace:" << ns << endl;
 				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
->>>>>>> upstream/master
+
 
 				log() << "[MYCODE_TIME] End of ISOLATION Phase:\tmillis:" << t.millis() << endl;
 
 				// 5. Run the algorithm
 				log() << "[MYCODE_TIME] Running the algorithm" << endl;
 				int assignment[numChunk];
-<<<<<<< HEAD
                                 bool loadBalance = cmdObj["loadBalance"].trueValue();
                                 log() << "[WWT] load balance = " << loadBalance << endl;
                                 bool multithread = cmdObj["multithread"].trueValue();
@@ -1100,11 +1096,8 @@ namespace mongo {
                                 else
 				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
 
-				log() << "[MYCODE] Reconfiguring first set of hosts" << endl;
-				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment,multithread,datainkr);
-                                log() << "[WWT] Reconfiguring first set of hosts takes" << t.millis()<<endl;
-=======
-				runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
+
+				
 
 				log() << "[MYCODE_TIME] End of Algorithm Phase:\tmillis:" << t.millis() << endl;
 
@@ -1145,13 +1138,11 @@ namespace mongo {
 					replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, false);
 				}
 
-<<<<<<< HEAD
-	                        log() << "[MYCODE_TIME] Reconfiguring secondary set of replicas" << endl;
-=======
+
 				log() << "[MYCODE_TIME] End of Secondary ISOLATION\tmillis:" << t.millis() << endl;
 
 				log() << "[MYCODE_TIME] Reconfiguring secondary set of replicas" << endl;
->>>>>>> upstream/master
+
 				for (int j = 1; j < numHosts; j++)
 				{
 					cout << "[MYCODE] Reconfiguring replicas:";
@@ -1162,14 +1153,10 @@ namespace mongo {
 					}
 					cout << endl;
 
-<<<<<<< HEAD
-                                  // 8. Reconfiguring the secondary replicas
-					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment,multithread,datainkr);
-					log() << "[WWT] Reconfiguring secondary set of hosts takes" << t.millis()<<endl;
-=======
+
                     // 8. Reconfiguring the secondary replicas
 					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment, t);
->>>>>>> upstream/master
+
 					if (!success)
 					{
 				        delete[] replicaSets;
@@ -1179,13 +1166,12 @@ namespace mongo {
 				}
 				
 				delete[] replicaSets;
-<<<<<<< HEAD
+
 				delete[] datainkr;
-=======
 
 				log() << "[MYCODE_TIME] End of Secondary Reconfigure\tmillis:" << t.millis() << endl;
 
->>>>>>> upstream/master
+
                 // 9. Enabling the balancer
                 setBalancerState(true);
 
@@ -1233,7 +1219,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                     log() << "[MYCODE] Pick split Vector\n";
                     scoped_ptr<ScopedDbConnection> conn(
                             ScopedDbConnection::getInternalScopedDbConnection( newShards[i].getConnString() ) );
-                    cout<<"[WWT] In command_admin splitVector address="<<newShards[i].getConnString()<<endl;
+                    
                     BSONObj result;
                     BSONObjBuilder cmd;
                     cmd.append( "splitVector" , ns );
@@ -1261,25 +1247,20 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
                 }
             }
 
-<<<<<<< HEAD
+
 			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[],bool multithread, long long **datainkr)
-=======
-			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[], Timer t)
->>>>>>> upstream/master
+
 			{
                 int numShards = shards.size();
 				int numChunk = splitPoints.size() + 1;
 
 				// 1. Chunk Migration
-<<<<<<< HEAD
-				log() << "[MYCODE_TIME] Migrating Chunk" << endl;
-				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas,multithread,datainkr);
-=======
+
 				log() << "[MYCODE_TIME] Migrating Chunk\tmillis:" << t.millis() << endl;
-				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas);
+				migrateChunk(ns, proposedKey, splitPoints, numChunk, assignment, shards, removedReplicas,multithread,datainkr);
 				log() << "[MYCODE_TIME] End Migrating Chunk\tmillis:" << t.millis() << endl;
 				log() << "[MYCODE_TIME] End EXECUTION Phase\tmillis:" << t.millis() << endl;
->>>>>>> upstream/master
+
 
                 //conversion from array to vector
                 vector<OpTime> currTSVector(currTS, currTS + numShards);
@@ -1520,113 +1501,9 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 				}
 			}
 
-<<<<<<< HEAD
-			/*void collectOplog(string ns, vector<Shard> shards, OpTime startTS[], vector<BSONObj>& allOps, string primary[])
-			{
-                int numShards = shards.size();
 
-				BSONObj info;
-				for (int i = 0; i < numShards; i++)
-				{
-					oplogReader.connect(primary[i]);
-
-					oplogReader.tailingQueryGTE(rsoplog, startTS[i]);
-					BSONObj o;
-					while (oplogReader.more())
-					{
-						o = oplogReader.next();
-						startTS[i] = o["ts"]._opTime();
-						printf("[MYCODE] OPLOG for Shard %d: %s\n", i, o.toString().c_str());
-
-						allOps.push_back(o);
-					}
-					oplogReader.resetConnection();
-				}
-			}
-
-			void oldReplayOplog(vector<BSONObj> allOps, BSONObj proposedKey, BSONObjSet splitPoints, int numChunk, int assignment[], string removedReplicas[])
-			{
-				const char *names[] = {"o", "ns", "op", "b"};
-				BSONElement fields[4];
-                BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
-                BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
-				for (vector<BSONObj>::iterator it = allOps.begin(); it != allOps.end(); it++)
-				{
-					it->getFields(4, names, fields);
-					cout << "[MYCODE] REPLAY:" << (*it).toString() << endl;
-					string name = fields[2].valuestrsafe();
-					const char *optype = name.c_str();
-					if (!(*optype == 'i' || *optype == 'd' || *optype == 'u'))
-						continue;
-
-					const string ns = fields[1].valuestrsafe();
-
-					BSONObj o;
-					if (*optype == 'i' || *optype == 'd')
-					{
-						BSONObj inter = fields[0].wrap();
-						o = inter["o"].Obj();
-					}
-					else if (*optype == 'u')
-						o = (*it)["o2"].Obj();
-
-					BSONObj value = o[proposedKey.firstElementFieldName()].Obj();
-					cout << "[MYCODE] REPLAY:" << o.toString() << " " << value.toString() << endl;
-
-					int i;
-					BSONObjSet::iterator it1 = splitPoints.begin();
-					BSONObj prev;
-					for (i = 0; i < numChunk; i++)
-					{
-                        BSONObj min = i > 0 ? prev : globalMin;
-                        BSONObj max = i == numChunk - 1 ? globalMax : *it1;
-
-						if ( min <= value && value < max)
-							break;
-						if ((i == 0 && value < (i + 1) * key2_range) ||
-							(i == numChunk - 1 && value >= i * key2_range) ||
-							(value >= i * key2_range && value < (i + 1) * key2_range))
-							break;
-
-						if (i < numChunk - 1)
-						{
-							prev = *it1;
-							it1++;
-						}
-					}
-
-					cout << "[MYCODE] Operation " << o.toString() << " going to shard " << removedReplicas[assignment[i]] << endl;
-                	scoped_ptr<ScopedDbConnection> conn(
-                		ScopedDbConnection::getScopedDbConnection(
-                        	removedReplicas[assignment[i]] ) );
-
-					int sourceCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
-
-					if (*optype == 'i')
-						conn->get()->insert(ns, o);
-					else if (*optype == 'u')
-					{
-						BSONObj update = fields[0].wrap();
-						conn->get()->update(ns, o, update, fields[3].booleanSafe());
-					}
-					else if (*optype == 'd')
-						conn->get()->remove(ns, o, fields[3].booleanSafe());
-
-					string errmsg = conn->get()->getLastError();
-					cout << "[MYCODE] Error:" << errmsg << endl;
-
-					int dstCount = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
-					cout << "[MYCODE] Source Count:" << sourceCount << " Dest Count:" << dstCount << endl;
-
-					conn->done();
-				}
-			}*/
-
-    
 			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
-=======
-			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
->>>>>>> upstream/master
+
 			{
 				printf("[MYCODE] RUNALGORITHM\n");
 				
@@ -1826,7 +1703,6 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 			{
                 vector<Shard> newShards;
                 Shard primary = grid.getDBConfig(ns)->getPrimary();
-                log()<<"WWT migrate Chunk primary connString:"<<primary.getConnString()<<endl;
                 primary.getAllShards( newShards );
                 int numShards = newShards.size();
 				for (int i = 0; i < numShards; i++)
@@ -1847,7 +1723,7 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 		for (int i = 0; i < numChunk; i++){
 			for (int j = 0; j < numShards; j++){
 				log() << datainkr[i][j]<<"\t";
-				if( minData > datainkr[i][j] && datainkr[i][j]!=0){
+				if( minData > datainkr[i][j] && datainkr[i][j]!=0 && j!=assignment[i]){
 					log() <<"min Change from = " <<minData<<endl;
 					minData = datainkr[i][j];
 				}
@@ -2013,46 +1889,6 @@ scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbCon
 					cout << "[MYCODE] Caught exception while moving data:" << e.what() << endl;
 				}
 
-				/*if (res["connerror"].ok())
-					cout << "Error:" << res["connerror"].str() << endl;
-				if (res["queryerror"].ok())
-					cout << "Error:" << res["queryerror"].str() << endl;
-				if (res["inserterror"].ok())
-					cout << "Error:" << res["inserterror"].str() << endl;
-				if (res["count"].ok())*/
-				//cout << "[MYCODE] Count returned:" << res.toString() << endl;
-				
-				//sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
-				//dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
-
-				/*while (true)
-				{
-					try
-					{
-						sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
-						break;
-					}
-					catch (DBException e)
-					{
-						continue;
-					}
-				}
-
-				while (true)
-				{
-					try
-					{
-						dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
-						break;
-					}
-					catch (DBException e)
-					{
-						continue;
-					}
-				}
-
-				cout << "[MYCODE] After Transfer" << endl;
-				cout << "[MYCODE] Source Count:" << sourceCount << " Dest Count:" << dstCount << endl;*/
 
 				toconn->done();
 				fromconn->done();
