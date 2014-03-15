@@ -989,7 +989,7 @@ namespace mongo {
 					log() << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
                     scoped_ptr<ScopedDbConnection> shardconn(
                     	ScopedDbConnection::getScopedDbConnection(
-                           	shards[i].getConnString() ) )
+                           	shards[i].getConnString() ) );
                     
                     rowCount += shardconn->get()->count(ns);
                     shardconn->done();
