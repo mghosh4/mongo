@@ -996,8 +996,8 @@ namespace mongo {
                 log() << "[MYCODE_TIME] rowCount: " << rowCount << endl;
 
                 long long maxObjectPerChunk = rowCount / numChunk;
-                if (maxObjectPerChunk > Chunk::MaxObjectPerChunk)
-                    maxObjectPerChunk = Chunk::MaxObjectPerChunk;
+                //if (maxObjectPerChunk > Chunk::MaxObjectPerChunk)
+                //    maxObjectPerChunk = Chunk::MaxObjectPerChunk;
 
                 pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize, numChunk - 1, maxObjectPerChunk);
 
