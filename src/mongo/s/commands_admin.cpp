@@ -1190,7 +1190,7 @@ namespace mongo {
                     cmd.append( "min" , min );
                     cmd.append( "max" , max );
                     cmd.append( "maxChunkSizeBytes" , chunkSize );
-                    cmd.append( "maxSplitPoints" , maxPoints );
+                    //cmd.append( "maxSplitPoints" , maxPoints );
                     cmd.append( "maxChunkObjects" , maxObjs );
                     cmd.appendBool( "reShard" , true);
                     BSONObj cmdObj = cmd.obj();
