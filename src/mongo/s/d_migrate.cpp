@@ -1613,45 +1613,52 @@ namespace mongo {
 			int count = 0;
 			while(1)
 			{
-				log() << "Query Range:" << qRange.toString() << endl;
-				scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
+				log() << "[MYCODE] Query Range:" << qRange.toString() << endl;
+                try
+                {
+				    scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
 
-				try
-				{
-					while (cursor->more()) {
-						count++;
-						o = cursor->next().getOwned();
-						//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
-        				{
-            				PageFaultRetryableSection pgrs;
-	        	    		while ( 1 ) {
-    	    	        		try {
-									Lock::DBWrite r(ns);
-									Client::Context context(ns);
-									theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
-            	        			break;
+				    try
+				    {
+				    	while (cursor->more()) {
+				    		count++;
+				    		o = cursor->next().getOwned();
+				    		//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+        		    		{
+            	    			PageFaultRetryableSection pgrs;
+	        	        		while ( 1 ) {
+    	    	            		try {
+				    					Lock::DBWrite r(ns);
+				    					Client::Context context(ns);
+				    					theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
+            	            			break;
+            	        			}
+            	        			catch ( PageFaultException& e ) {
+            	            			e.touch();
+            	        			}
             	    			}
-            	    			catch ( PageFaultException& e ) {
-            	        			e.touch();
-            	    			}
-            				}
-        				}
-					}
-					break;
-				}
-				catch (DBException e)
-				{
-					log() << "Last BSONObj before crash:" << o.toString() << endl;
+        		    		}
+				    	}
+				    	break;
+				    }
+				    catch (DBException e)
+				    {
+				    	log() << "[MYCODE] Last BSONObj before crash:" << o.toString() << endl;
 
-					BSONObjBuilder b;
-					BSONObjBuilder sub(b.subobjStart(key));
-					sub.appendAs(o[key], "$gt");
-					BSONObj rangeVal = qRange[key].Obj();
-					if (!rangeVal["$lt"].eoo())
-						sub.append(rangeVal["$lt"]);
-					BSONObj subObj = sub.done();
-					qRange = b.done().getOwned();
-				}
+				    	BSONObjBuilder b;
+				    	BSONObjBuilder sub(b.subobjStart(key));
+				    	sub.appendAs(o[key], "$gt");
+				    	BSONObj rangeVal = qRange[key].Obj();
+				    	if (!rangeVal["$lt"].eoo())
+				    		sub.append(rangeVal["$lt"]);
+				    	BSONObj subObj = sub.done();
+				    	qRange = b.done().getOwned();
+				    }
+                }
+                catch (DBException e)
+                {
+                    log() << "[MYCODE] DBClientCursor call failed" << endl;
+                }
 			}
 
 			log() << "[MYCODE] count: " << count << endl;

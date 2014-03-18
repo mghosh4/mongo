@@ -1089,6 +1089,7 @@ namespace mongo {
 				}
 
 				log() << "[MYCODE_TIME] End of Primary Reconfiguration:\tmillis:" << t.millis() << endl;
+                printCount(splitPoints, ns, replicaSets, numChunk, numShards, proposedKey);
 
 				log() << "[MYCODE_TIME] Checking Timestamp before starting secondaries" << endl;
 
@@ -1134,14 +1135,13 @@ namespace mongo {
                         setBalancerState(true);
 						return false;
 					}
-				}
-				
-				delete[] replicaSets;
+				}	
 
 				log() << "[MYCODE_TIME] End of Secondary Reconfigure\tmillis:" << t.millis() << endl;
 
                 // 9. Enabling the balancer
                 setBalancerState(true);
+				delete[] replicaSets;
 
 				log() << "[MYCODE_TIME] Resharding Complete\tmillis:" << t.millis() << endl;
 
@@ -1149,6 +1149,29 @@ namespace mongo {
 
 				return true;
 			}
+
+            void printCount(BSONObjSet splitPoints, string ns, string** replicaSets, int numChunk, int numShards, BSONObj proposedKey)
+            {
+			    long long **datainkr;
+                datainkr = new long long*[numChunk];
+				for (int i = 0; i < numChunk; i++)
+                    datainkr[i] = new long long[numShards];
+
+                for (int j = 0; j < 3; j++)
+                {
+				    string removedReplicas[numShards];
+				    for (int i = 0; i < numShards; i++)
+					    removedReplicas[i] = replicaSets[j][i];
+                
+				    for (int i = 0; i < numChunk; i++)
+					    for (int j = 0; j < numShards; j++)
+						    datainkr[i][j] = 0;
+
+                    collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
+                }
+
+                delete[] datainkr;
+            }
 
             void setBalancerState(bool state)
             {
@@ -1656,19 +1679,6 @@ namespace mongo {
 				for (unsigned i = 0; i < migrateThreads.size(); i++) {
 					migrateThreads[i]->join();
 				}
-
-				long long **datainkr;
-                datainkr = new long long*[numChunk];
-				for (int i = 0; i < numChunk; i++)
-                    datainkr[i] = new long long[numShards];
-
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-						datainkr[i][j] = 0;
-
-                //collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
-
-                delete[] datainkr;
 			}
 
 			void singleMigrate(string removedreplicas[], BSONObj range, const char *key, BSONObj min, int i, int j, int assignment[], const string ns)

@@ -750,7 +750,7 @@ namespace mongo {
                 
                 Client::Context ctx(ns);
                 
-                long long n = deleteObjects(ns, pattern, justOne, true);
+                long long n = deleteObjects(ns, pattern, justOne, !isOplogThrottled(ns));
                 lastError.getSafe()->recordDelete( n );
                 op.debug().ndeleted = n;
                 break;
