@@ -1704,17 +1704,26 @@ namespace mongo {
 					}
 				}*/
 		long long minData = LLONG_MAX;
+		long long maxData = 0;
 		for (int i = 0; i < numChunk; i++){
 			for (int j = 0; j < numShards; j++){
 				log() << datainkr[i][j]<<"\t";
 				if( minData > datainkr[i][j] && datainkr[i][j]!=0 && j!=assignment[i]){
-					log() <<"min Change from = " <<minData<<endl;
+					//log() <<"min Change from = " <<minData<<endl;
 					minData = datainkr[i][j];
+				}
+				if (maxData < datainkr[i][j] && datainkr[i][j]!=0 &&j!=assignment[i]){
+					maxData = datainkr[i][j];
 				}
 			}
 			log() <<endl;
 		}
-		log()<<"[WWT] min Migrated Data size = " <<minData <<endl;
+		long long unit = minData;
+		if (minData < (maxData/10) ){
+			unit = maxData/10;
+		}
+		//long long unit = minData> maxData/10 ? min: maxData/10;
+		log()<<"[WWT] data unit ="<< unit<< " minMigrated Data size = " <<minData << "maxMigrated Data size = "<<maxData <<endl;
 
 				vector<shared_ptr<boost::thread> > migrateThreads;
 
@@ -1762,7 +1771,7 @@ namespace mongo {
                 						cout << "[WWT] Max:" << max.toString() << endl;
 								migrateThreads.push_back(shared_ptr<boost::thread>(
 
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,minData))));
+									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,unit))));
 							}
 						}
 					}
@@ -1793,7 +1802,7 @@ namespace mongo {
 */
 			}
 
-			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,long long minData)
+			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,long long unit)
 			{
                 //bool multithread = true;
                 const char *key = proposedKey.firstElement().fieldName();
@@ -1841,6 +1850,7 @@ namespace mongo {
 				cout << "[MYCODE] Range:" << range.toString() << endl;
 				cout << "[MYCODE] Chunk " << i << " moving data from shard " << j << " to " << assignment[i] << endl;
 				cout << "[MYCODE] Source Count: " << sourceCount << " Dest Count: " << dstCount << endl;
+                                cout << "[MYCODe] Threads: "<<(int)round(((double) sourceCount)/unit) << endl;
 
                 BSONObjBuilder b;
                 b.appendAs(min[key], "min");
@@ -1859,7 +1869,7 @@ namespace mongo {
 							"min"<<min<<
                                                         "max"<<max<<
       							"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
-							"splitPoints"<<(int)round(((double) sourceCount)/minData)<<
+							"splitPoints"<<(int)round(((double) sourceCount)/unit)<<
       							"shardId" << Chunk::genID(ns, minID) << 
       							"configdb" << configServer.modelServer() << 
       							"secondaryThrottle" << true <<
