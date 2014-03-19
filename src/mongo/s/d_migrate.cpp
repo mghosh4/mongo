@@ -1678,7 +1678,7 @@ namespace mongo {
             	vector<shared_ptr<boost::thread> > migrateThreads;
             	BSONObjSet::iterator range_ptr = rangeSet.begin();
             	int requestThread = threads;
-                int localFinishedThread = 0;
+                //int localFinishedThread = 0;
                 
 		int concurrentThread = 0;
            	
