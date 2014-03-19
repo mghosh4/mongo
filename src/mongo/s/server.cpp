@@ -109,7 +109,7 @@ namespace mongo {
                 r.process();
             }
             catch ( AssertionException & e ) {
-                log() << "[MYCODE] User Exception 5" << endl;
+                log() << "[MYCODE] User Exception 5:" << e.what() << endl;
                 LOG( e.isUserAssertion() ? 1 : 0 ) << "AssertionException while processing op type : " << m.operation() << " to : " << r.getns() << causedBy(e) << endl;
 
                 le->raiseError( e.getCode() , e.what() );
@@ -126,6 +126,7 @@ namespace mongo {
                 // e.what().  we should think about what is the right level of detail both 
                 // for logging and return code.
                 log() << "DBException in process: " << e.what() << endl;
+                log() << "[MYCODE] User Exception 5:" << e.what() << endl;
 
                 le->raiseError( e.getCode() , e.what() );
 

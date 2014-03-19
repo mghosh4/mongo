@@ -998,8 +998,8 @@ namespace mongo {
                 log() << "[MYCODE_TIME] rowCount: " << rowCount << endl;
 
                 long long maxObjectPerChunk = rowCount / numChunk;
-                if (maxObjectPerChunk > Chunk::MaxObjectPerChunk)
-                    maxObjectPerChunk = Chunk::MaxObjectPerChunk;
+                //if (maxObjectPerChunk > Chunk::MaxObjectPerChunk)
+                //    maxObjectPerChunk = Chunk::MaxObjectPerChunk;
 
                 pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize, numChunk - 1, maxObjectPerChunk);
 
@@ -1113,6 +1113,7 @@ namespace mongo {
 				}
 
 				log() << "[MYCODE_TIME] End of Primary Reconfiguration:\tmillis:" << t.millis() << endl;
+                printCount(splitPoints, ns, replicaSets, numChunk, numShards, proposedKey);
 
 				log() << "[MYCODE_TIME] Checking Timestamp before starting secondaries" << endl;
 
@@ -1123,7 +1124,7 @@ namespace mongo {
 					primaryReplicas[i] = replicaSets[0][i];
 
 				log() << "[MYCODE_TIME] Stopping secondary set of replicas" << endl;
-                                for (int j = 1; j < numHosts; j++)
+				for (int j = 1; j < numHosts; j++)
 				{
 					cout << "[MYCODE] Stopping replicas:";
 					for (int i = 0; i < numShards; i++)
@@ -1150,7 +1151,6 @@ namespace mongo {
 					}
 					cout << endl;
 
-
                     // 8. Reconfiguring the secondary replicas
 					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment, t, multithread, datainkr);
 
@@ -1160,15 +1160,15 @@ namespace mongo {
                         setBalancerState(true);
 						return false;
 					}
-				}
-				
-				delete[] replicaSets;
+				}	
 
 				delete[] datainkr;
 				log() << "[MYCODE_TIME] End of Secondary Reconfigure\tmillis:" << t.millis() << endl;
 
                 // 9. Enabling the balancer
                 setBalancerState(true);
+				delete[] replicaSets;
+
 
 				log() << "[MYCODE_TIME] Resharding Complete\tmillis:" << t.millis() << endl;
 
@@ -1177,9 +1177,32 @@ namespace mongo {
 				return true;
 			}
 
+            void printCount(BSONObjSet splitPoints, string ns, string** replicaSets, int numChunk, int numShards, BSONObj proposedKey)
+            {
+			    long long **datainkr;
+                datainkr = new long long*[numChunk];
+				for (int i = 0; i < numChunk; i++)
+                    datainkr[i] = new long long[numShards];
+
+                for (int j = 0; j < 3; j++)
+                {
+				    string removedReplicas[numShards];
+				    for (int i = 0; i < numShards; i++)
+					    removedReplicas[i] = replicaSets[j][i];
+                
+				    for (int i = 0; i < numChunk; i++)
+					    for (int j = 0; j < numShards; j++)
+						    datainkr[i][j] = 0;
+
+                    collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
+                }
+
+                delete[] datainkr;
+            }
+
             void setBalancerState(bool state)
             {
-		scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
+		        scoped_ptr<ScopedDbConnection> conn1( ScopedDbConnection::getInternalScopedDbConnection( 
                         configServer.getPrimary().getConnString() ) );
 
 				//2. Disable the balancer
@@ -1217,7 +1240,7 @@ namespace mongo {
                     cmd.append( "min" , min );
                     cmd.append( "max" , max );
                     cmd.append( "maxChunkSizeBytes" , chunkSize );
-                    cmd.append( "maxSplitPoints" , maxPoints );
+                    //cmd.append( "maxSplitPoints" , maxPoints );
                     cmd.append( "maxChunkObjects" , maxObjs );
                     cmd.appendBool( "reShard" , true);
                     BSONObj cmdObj = cmd.obj();
@@ -1403,7 +1426,7 @@ namespace mongo {
                         done = false;
                         trials++;
                     }
-             } while (!done && trials < 10);
+                } while (!done && trials < 10);
 
                 if(!done && trials >= 10) {
                     cout << "[MYCODE_HOLLA] Could not replay oplog on " << replica << endl;
@@ -1423,7 +1446,8 @@ namespace mongo {
                 	scoped_ptr<ScopedDbConnection> conn(
                 		ScopedDbConnection::getScopedDbConnection(
                         	newShards[i].getConnString() ) );
-                        	conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
+
+					conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
 					string primaryStr = info["primary"].String();
 
 					BSONObjIterator iter(info["hosts"].Obj());
@@ -1439,7 +1463,7 @@ namespace mongo {
 				}
 			}
 
-                        void collectIDs(vector<Shard> newShards, int numShards, map<string, int>& hostIDMap)
+			void collectIDs(vector<Shard> newShards, int numShards, map<string, int>& hostIDMap)
 			{
 				BSONObj info;
 				int hostNum;
@@ -1468,7 +1492,7 @@ namespace mongo {
 				cout << "[MYCODE] hostIDMap size: " << hostIDMap.size() << endl;
 			}
 
-                  	void checkTimestamp(string shards[], int numShards, OpTime startTS[])
+			void checkTimestamp(string shards[], int numShards, OpTime startTS[])
 			{
 				BSONObj info;
 				for (int i = 0; i < numShards; i++)
@@ -1643,6 +1667,7 @@ namespace mongo {
                 return range;
             }
              void getMinMaxAsBSON(BSONObj range, BSONObj proposedKey, BSONObj& min, BSONObj& max)
+             
             {
                 const char *key = proposedKey.firstElement().fieldName();
                 BSONObj sub = range[key].Obj();
@@ -1786,20 +1811,23 @@ namespace mongo {
 				for (unsigned i = 0; i < migrateThreads.size(); i++) {
 					migrateThreads[i]->join();
 				}
-/*
-				long long **datainkr;
-                datainkr = new long long*[numChunk];
-				for (int i = 0; i < numChunk; i++)
-                    datainkr[i] = new long long[numShards];
 
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-						datainkr[i][j] = 0;
 
-                //collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, datainkr);
 
-                delete[] datainkr;
-*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 			}
 
 			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,long long unit)
