@@ -1700,6 +1700,7 @@ namespace mongo {
                         		concurrentThread++;
                     		}
                 	}
+/*
                         log()<<"[WWT] concurrentThread = "<<concurrentThread<<endl;
                         while(true){
 			     log()<<"[WWT] begin the check localFinishedThread = "<<localFinishedThread<<endl;
@@ -1737,6 +1738,7 @@ namespace mongo {
                              }
                              
                         }	
+*/
                         
             	}
 		for (unsigned i = 0; i < migrateThreads.size(); i++) {
@@ -1822,7 +1824,7 @@ namespace mongo {
 
 			log() << "[MYCODE] Removal Complete" << endl;
 			fromConn->done();
-                        log()<<"[WWT_TIME] FetchingData count "<< count << " from "<< from << "to " <<to <<"Finish in "<<t1.millis()<<endl;
+			log()<<"[WWT_TIME] FetchingData count "<< count << " from "<< from << "to " <<to <<"Finish in "<<t1.millis()<<endl;
 			return true;
              	}
 	   }
@@ -1843,10 +1845,12 @@ namespace mongo {
 			{
 				log() << "Query Range:" << qRange.toString() << endl;
 				   
-				
+		try
+                {
+				scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk)); 
                                 try
 				{
-					scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk)); 
+					
 					while (cursor->more()) {
 						count++;
 						o = cursor->next().getOwned();
@@ -1882,6 +1886,12 @@ namespace mongo {
 					BSONObj subObj = sub.done();
 					qRange = b.done().getOwned();
 				}
+		}
+                catch (DBException e)
+                {
+                    log() << "[MYCODE] DBClientCursor call failed" << endl;
+                }
+			
 			}
                       
 			while (true)
