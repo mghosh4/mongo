@@ -1079,7 +1079,6 @@ namespace mongo {
                 cout << "[MYCODE] Namespace:" << ns << endl;
 				replicaStop(ns, numShards, removedReplicas, primaryReplicas, currTS, true);
 
-
 				log() << "[MYCODE_TIME] End of ISOLATION Phase:\tmillis:" << t.millis() << endl;
 
 				// 5. Run the algorithm
@@ -1095,19 +1094,15 @@ namespace mongo {
                                 else
 				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
 
-
-				
-
 				log() << "[MYCODE_TIME] End of Algorithm Phase:\tmillis:" << t.millis() << endl;
 
                 // 6. Reconfiguring the first set of replicas
 				log() << "[MYCODE_TIME] Reconfiguring first set of hosts" << endl;
 
 				bool success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, currTS, proposedKey, hostIDMap, true, errmsg, splitPoints, assignment, t, multithread, datainkr);
-
 				if (!success)
 				{
-					delete[] replicaSets;
+				    delete[] replicaSets;
                     setBalancerState(true);
 					return false;
 				}
@@ -1153,7 +1148,6 @@ namespace mongo {
 
                     // 8. Reconfiguring the secondary replicas
 					success = reconfigureHosts(ns, shards, removedReplicas, primaryReplicas, newTS, proposedKey, hostIDMap, false, errmsg, splitPoints, assignment, t, multithread, datainkr);
-
 					if (!success)
 					{
 				        delete[] replicaSets;
@@ -1168,7 +1162,6 @@ namespace mongo {
                 // 9. Enabling the balancer
                 setBalancerState(true);
 				delete[] replicaSets;
-
 
 				log() << "[MYCODE_TIME] Resharding Complete\tmillis:" << t.millis() << endl;
 
@@ -1584,7 +1577,7 @@ namespace mongo {
                 delete[] newdatainkr;
                 delete algo;
 			}
-			
+		
             void collectData(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, long long **datainkr)
             {
 			    const char *key = proposedKey.firstElement().fieldName();
@@ -1795,7 +1788,6 @@ namespace mongo {
                                                                 cout << "[WWT] Min:" << min.toString() << endl;
                 						cout << "[WWT] Max:" << max.toString() << endl;
 								migrateThreads.push_back(shared_ptr<boost::thread>(
-
 									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,unit))));
 							}
 						}
@@ -1811,23 +1803,6 @@ namespace mongo {
 				for (unsigned i = 0; i < migrateThreads.size(); i++) {
 					migrateThreads[i]->join();
 				}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 			}
 
 			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,long long unit)
@@ -1922,6 +1897,7 @@ namespace mongo {
 				for (int i = 0; i < numShards; i++)
 				{
 					printf("[MYCODE] MYCUSTOMPRINT: %s going to remove %s\n", primary[i].c_str(), removedReplicas[i].c_str());
+					
 					if (collectTS)
 					{
                         while(!oplogReader.connect(primary[i]))
@@ -2077,7 +2053,6 @@ namespace mongo {
 				}
 
 				conn->done();
-
 			}
 
 			void updateConfig(string ns, BSONObj proposedKey, BSONObjSet splitPoints, int numChunk, int assignment[])
