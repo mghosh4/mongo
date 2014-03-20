@@ -1679,7 +1679,15 @@ namespace mongo {
 			}
 
 			log() << "[MYCODE] Removal Complete" << endl;
-			fromConn->done();
+
+            try
+            {
+			    fromConn->done();
+            }
+            catch(DBException e)
+            {
+                log() << "[MYCODE] Caught exception while killing connection" << endl;
+            }
 
 			return true;
 		}

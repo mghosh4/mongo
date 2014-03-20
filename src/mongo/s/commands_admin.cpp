@@ -1684,14 +1684,35 @@ namespace mongo {
 			void singleMigrate(string removedreplicas[], BSONObj range, const char *key, BSONObj min, int i, int j, int assignment[], const string ns)
 			{
 				BSONObj res;
+                scoped_ptr<ScopedDbConnection> fromconn, toconn;
 
-                scoped_ptr<ScopedDbConnection> toconn(
-               		ScopedDbConnection::getScopedDbConnection(
-                 		removedreplicas[assignment[i]] ) );
+                while(true)
+                {
+                    try
+                    {
+                        toconn.reset(ScopedDbConnection::getScopedDbConnection(
+                         		removedreplicas[assignment[i]] ) );
+                        break;
+                    }
+					catch (DBException e)
+					{
+						continue;
+					}
+                }
 
-				scoped_ptr<ScopedDbConnection> fromconn(
-               		ScopedDbConnection::getScopedDbConnection(
-                     	removedreplicas[j] ) );
+                while(true)
+                {
+                    try
+                    {
+				        fromconn.reset(ScopedDbConnection::getScopedDbConnection(
+                             	removedreplicas[j] ) );
+                        break;
+                    }
+                    catch(DBException e)
+                    {
+                        continue;
+                    }
+                }
 
 				long long sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
 				long long dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
@@ -1751,8 +1772,23 @@ namespace mongo {
 					cout << "[MYCODE] Caught exception while moving data:" << e.what() << endl;
 				}
 
-				toconn->done();
-				fromconn->done();
+                try
+                {
+				    toconn->done();
+                }
+                catch(DBException e)
+                {
+                    cout << "[MYCODE] Caught exception while killing the connection" << endl;
+                }
+
+                try
+                {
+				    fromconn->done();
+                }
+                catch(DBException e)
+                {
+                    cout << "[MYCODE] Caught exception while killing the connection" << endl;
+                }
 			}
 
 			void replicaStop(const string ns, int numShards, string removedReplicas[], string primary[], OpTime startTS[], bool collectTS)
@@ -1782,24 +1818,6 @@ namespace mongo {
 				for (unsigned i = 0; i < stopThreads.size(); i++) 
 					stopThreads[i]->join();
             }
-
-            /*void singleStop(string primary, string removedReplica)
-            {
-				BSONObj info;
-                scoped_ptr<ScopedDbConnection> conn(
-                	ScopedDbConnection::getScopedDbConnection(
-                       	primary ) );
-                
-                try
-				{
-					conn->get()->runCommand("admin", BSON("replSetRemove" << removedReplica), info);
-				}
-				catch(DBException e){
-					cout << "[MYCODE] stepping down" << " threw exception: " << e.toString() << endl;
-				}
-
-				conn->done();
-			}*/
 
             void singleStop(string primary, string removedReplica, string ns)
             {
