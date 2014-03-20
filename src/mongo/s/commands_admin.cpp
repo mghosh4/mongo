@@ -1108,7 +1108,7 @@ namespace mongo {
 				}
 
 				log() << "[MYCODE_TIME] End of Primary Reconfiguration:\tmillis:" << t.millis() << endl;
-                printCount(splitPoints, ns, replicaSets, numChunk, numShards, proposedKey);
+                //printCount(splitPoints, ns, replicaSets, numChunk, numShards, proposedKey);
 
 				log() << "[MYCODE_TIME] Checking Timestamp before starting secondaries" << endl;
 
@@ -1740,6 +1740,29 @@ namespace mongo {
 		if (minData < (maxData/10) ){
 			unit = maxData/10;
 		}
+/*
+		long long **latency;
+                latency = new long long*[numShards];
+				for (int i = 0; i < numShards; i++)
+                    latency[i] = new long long[numShards];
+		for (int i = 0; i < numShards; i++){
+			for (int j = i+1; j < numShards; j++){
+				BSONObj res;
+				scoped_ptr<ScopedDbConnection> toconn(
+               		ScopedDbConnection::getScopedDbConnection(
+                 		removedReplicas[i] ) );
+				toconn->get()->ping( "admin" , 
+						BSON( 	"testLatency" << ns <<
+							"to" << removedReplicas[j]<< 
+      							"ns" << ns << 
+      						) ,
+						res
+					);
+				latency[i][j]=latency[j][i] = res["millis"].Int();
+				cout<<"[WWT] latency between "<<removedReplicas[i]<<" and "<<removedReplicas[j] << " is "<< latency[i][j]<<endl;
+			}
+		}
+*/
 		//long long unit = minData> maxData/10 ? min: maxData/10;
 		log()<<"[WWT] data unit ="<< unit<< " minMigrated Data size = " <<minData << "maxMigrated Data size = "<<maxData <<endl;
 

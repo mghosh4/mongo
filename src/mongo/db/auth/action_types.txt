@@ -52,6 +52,7 @@
 "mapReduceShardedFinish",
 "moveChunk",
 "moveData",
+"testLatency",
 "movePrimary",
 "netstat",
 "profileEnable",

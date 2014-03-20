@@ -1492,6 +1492,34 @@ namespace mongo {
         }
 
     } moveChunkCmd;
+class TestLatencyCommand : public Command {
+        
+    public:
+        TestLatencyCommand() : Command( "testLatency" ) {}
+        virtual void help( stringstream& help ) const {
+            help << "should not be calling this directly";
+        }
+
+        virtual bool slaveOk() const { return true; }
+        virtual bool adminOnly() const { return true; }
+        virtual LockType locktype() const { return NONE; }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::moveData);
+            out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
+        }
+
+
+        bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
+		string to = cmdObj["to"].str();
+		Timer t;
+		log() << "TestLatency " <<to<<endl;
+		result.append("millis", t.millis());
+		return true;
+	}
+}TestLatencyCommand;
 
     /**
      * this is the main entry for moveData
@@ -1616,9 +1644,9 @@ namespace mongo {
              	BSONObj min = cmdObj.getObjectField( "min" );
              	BSONObj max = cmdObj.getObjectField( "max" );
              	int threads = cmdObj["splitPoints"].Int();
-                if (threads < 1){
-			threads = 1;
-                }
+                //if (threads < 1){
+			threads = 2;
+                //}
 		log() << "[WWT] threads = " <<threads<<endl;
                 log() << "[WWT] min = " << min.toString()<<endl;
                 log() << "[WWT] max =" << max.toString()<<endl;
