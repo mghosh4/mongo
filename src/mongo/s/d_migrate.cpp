@@ -1945,11 +1945,19 @@ class TestLatencyCommand : public Command {
 			}
 
 			log() << "[MYCODE WWT] Removal Complete" << endl;
-			fromConn->done();
+			 try
+            {
+			    fromConn->done();
+            }
+            catch(DBException e)
+            {
+                log() << "[MYCODE] Caught exception while killing connection" << endl;
+            }
+/*
                         finish_mx_.lock();
                         globalFinishedThread++;
                         finish_mx_.unlock();
-                        
+                      */  
                         cc().shutdown();
             }
 
