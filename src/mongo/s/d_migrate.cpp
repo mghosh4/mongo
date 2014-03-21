@@ -1851,8 +1851,17 @@ class TestLatencyCommand : public Command {
 			}
 
 			log() << "[MYCODE] Removal Complete" << endl;
-			fromConn->done();
-			log()<<"[WWT_TIME] FetchingData count "<< count << " from "<< from << "to " <<to <<"Finish in "<<t1.millis()<<endl;
+
+            try
+            {
+			    fromConn->done();
+            }
+            catch(DBException e)
+            {
+                log() << "[MYCODE] Caught exception while killing connection" << endl;
+            }
+
+
 			return true;
              	}
 	   }

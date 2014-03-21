@@ -1740,31 +1740,9 @@ namespace mongo {
 		if (minData < (maxData/10) ){
 			unit = maxData/10;
 		}
-/*
-		long long **latency;
-                latency = new long long*[numShards];
-				for (int i = 0; i < numShards; i++)
-                    latency[i] = new long long[numShards];
-		for (int i = 0; i < numShards; i++){
-			for (int j = i+1; j < numShards; j++){
-				BSONObj res;
-				scoped_ptr<ScopedDbConnection> toconn(
-               		ScopedDbConnection::getScopedDbConnection(
-                 		removedReplicas[i] ) );
-				toconn->get()->ping( "admin" , 
-						BSON( 	"testLatency" << ns <<
-							"to" << removedReplicas[j]<< 
-      							"ns" << ns << 
-      						) ,
-						res
-					);
-				latency[i][j]=latency[j][i] = res["millis"].Int();
-				cout<<"[WWT] latency between "<<removedReplicas[i]<<" and "<<removedReplicas[j] << " is "<< latency[i][j]<<endl;
-			}
-		}
-*/
 		//long long unit = minData> maxData/10 ? min: maxData/10;
 		log()<<"[WWT] data unit ="<< unit<< " minMigrated Data size = " <<minData << "maxMigrated Data size = "<<maxData <<endl;
+
 
 				vector<shared_ptr<boost::thread> > migrateThreads;
 
@@ -1807,9 +1785,9 @@ namespace mongo {
 							
 							if (sourceCount > 0)
 							{
-								int xy[2] = {i,j};
-                                                                cout << "[WWT] Min:" << min.toString() << endl;
-                						cout << "[WWT] Max:" << max.toString() << endl;
+											
+								int xy[2]={i,j};
+
 								migrateThreads.push_back(shared_ptr<boost::thread>(
 									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,unit))));
 							}
@@ -1841,9 +1819,37 @@ namespace mongo {
                		ScopedDbConnection::getScopedDbConnection(
                  		removedreplicas[assignment[i]] ) );
 
-				scoped_ptr<ScopedDbConnection> fromconn(
+		scoped_ptr<ScopedDbConnection> fromconn(
                		ScopedDbConnection::getScopedDbConnection(
                      	removedreplicas[j] ) );
+                while(true)
+                {
+                    try
+                    {
+                        toconn.reset(ScopedDbConnection::getScopedDbConnection(
+                         		removedreplicas[assignment[i]] ) );
+                        break;
+                    }
+					catch (DBException e)
+					{
+						continue;
+					}
+                }
+
+
+                while(true)
+                {
+                    try
+                    {
+				        fromconn.reset(ScopedDbConnection::getScopedDbConnection(
+                             	removedreplicas[j] ) );
+                        break;
+                    }
+                    catch(DBException e)
+                    {
+                        continue;
+                    }
+                }
 
 				long long sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
 				long long dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
@@ -1909,8 +1915,23 @@ namespace mongo {
 					cout << "[MYCODE] Caught exception while moving data:" << e.what() << endl;
 				}
 
-				toconn->done();
-				fromconn->done();
+                try
+                {
+				    toconn->done();
+                }
+                catch(DBException e)
+                {
+                    cout << "[MYCODE] Caught exception while killing the connection" << endl;
+                }
+
+                try
+                {
+				    fromconn->done();
+                }
+                catch(DBException e)
+                {
+                    cout << "[MYCODE] Caught exception while killing the connection" << endl;
+                }
 			}
 
 			void replicaStop(const string ns, int numShards, string removedReplicas[], string primary[], OpTime startTS[], bool collectTS)
@@ -1940,24 +1961,6 @@ namespace mongo {
 				for (unsigned i = 0; i < stopThreads.size(); i++) 
 					stopThreads[i]->join();
             }
-
-            /*void singleStop(string primary, string removedReplica)
-            {
-				BSONObj info;
-                scoped_ptr<ScopedDbConnection> conn(
-                	ScopedDbConnection::getScopedDbConnection(
-                       	primary ) );
-                
-                try
-				{
-					conn->get()->runCommand("admin", BSON("replSetRemove" << removedReplica), info);
-				}
-				catch(DBException e){
-					cout << "[MYCODE] stepping down" << " threw exception: " << e.toString() << endl;
-				}
-
-				conn->done();
-			}*/
 
             void singleStop(string primary, string removedReplica, string ns)
             {
