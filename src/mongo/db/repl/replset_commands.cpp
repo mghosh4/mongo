@@ -361,7 +361,7 @@ namespace mongo {
             out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
         }
         virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
-			cout << "[MYCODE] Replica Set Write Throttle Command called" << endl;
+			cout << "[MYCODE] Replica Set Write Throttle Command called: " << cmdObj.toString() << endl;
             if( !check(errmsg, result) )
                 return false;
 

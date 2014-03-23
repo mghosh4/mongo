@@ -1530,8 +1530,20 @@ namespace mongo {
                 		ScopedDbConnection::getScopedDbConnection(
 							replicas[i] ) );
 
-                    long long total = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
-                    cout << "[MYCODE] Shard " << i << " count:" << total << endl;
+                    while(true)
+                    {
+                        try
+                        {
+                            long long total = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+                            cout << "[MYCODE] Shard " << i << " count:" << total << endl;
+                            break;
+                        }
+                        catch(DBException e)
+                        {
+                        	cout << "[MYCODE] Exception trying to populate datainkr: " << e.what() << endl;
+							continue;
+                        }
+                    }
 
                     BSONObjSet::iterator it = splitPoints.begin();
                     BSONObj prev;
@@ -1879,15 +1891,19 @@ namespace mongo {
                 scoped_ptr<ScopedDbConnection> hostConn(
                 	ScopedDbConnection::getScopedDbConnection(
                        	removedReplica ) );
-				try
-				{
-					conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
-					string errmsg = conn->get()->getLastError();
-					cout << "[MYCODE] Replica Return:" << errmsg << endl;
-				}
-				catch(DBException e){
-					cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
-				}
+
+                if (makePrimary)
+                {
+				    try
+				    {
+				    	conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
+				    	string errmsg = conn->get()->getLastError();
+				    	cout << "[MYCODE] Replica Return:" << errmsg << endl;
+				    }
+				    catch(DBException e){
+				    	cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
+				    }
+                }
 
 				try
 				{

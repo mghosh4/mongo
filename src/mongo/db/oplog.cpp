@@ -72,7 +72,7 @@ namespace mongo {
         bool flag = false;
         if (cli.exists(rsSettingNS))
         {
-            log() << "[MYCODE] Checking for throttle value" << endl;
+            //log() << "[MYCODE] Checking for throttle value" << endl;
             try
             {
                 scoped_ptr<DBClientCursor> cursor(cli.query( rsSettingNS, Query() ));
@@ -96,10 +96,10 @@ namespace mongo {
                 log() << "[MYCODE] dbexception: findOne call failed for " << rsSettingNS << endl;
             }
 
-            log() << "[MYCODE] Throttle value: " << throttleObj.toString() << endl;
+            //log() << "[MYCODE] Throttle value: " << throttleObj.toString() << endl;
             if (!throttleObj["stopped"].eoo())
             {
-                log() << "[MYCODE] Checking for stopped value" << endl;
+                //log() << "[MYCODE] Checking for stopped value" << endl;
                 bool stopped = throttleObj["stopped"].Bool();
                 if (stopped)
                 {
