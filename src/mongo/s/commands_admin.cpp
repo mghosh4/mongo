@@ -1470,7 +1470,8 @@ namespace mongo {
 				BSONObj info;
 				for (int i = 0; i < numShards; i++)
 				{
-					while(!oplogReader.connect(shards[i]))
+				    cout << "Connecting to: " << shards[i] << endl;
+                	while(!oplogReader.connect(shards[i]))
                     {
                         cout << "[MYCODE] Oplog Reader Connect Failed" << endl;
                     }
