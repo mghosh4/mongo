@@ -48,6 +48,7 @@
 #include "mongo/util/stringutils.h"
 #include "mongo/util/timer.h"
 #include "mongo/util/version.h"
+#include "mongo/util/HungarianAlgo.h"
 
 namespace mongo {
 
@@ -1072,8 +1073,21 @@ namespace mongo {
 
 				// 5. Run the algorithm
 				log() << "[MYCODE_TIME] Running the algorithm" << endl;
+                bool loadBalance = cmdObj["loadBalance"].trueValue();
 				int assignment[numChunk];
-				runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
+				long long **datainkr;
+                datainkr = new long long*[numChunk];
+				for (int i = 0; i < numChunk; i++)
+                    datainkr[i] = new long long[numShards];
+
+				for (int i = 0; i < numChunk; i++)
+					for (int j = 0; j < numShards; j++)
+						datainkr[i][j] = 0;
+
+                if (loadBalance)
+                    runLBAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
+                else
+				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
 
 				log() << "[MYCODE_TIME] End of Algorithm Phase:\tmillis:" << t.millis() << endl;
 
@@ -1484,17 +1498,54 @@ namespace mongo {
 				}
 			}
 
-			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
+            void runLBAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
+            {
+                printf("[MYCODE] RUN-LOADBALANCE-ALGORITHM\n");
+
+                collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
+                int chunkpershard = (int)ceil((double)numChunk/numShards);
+                long long **newdatainkr = new long long*[numChunk];
+                for (int i = 0; i < numChunk; i++)
+                    newdatainkr[i] = new long long[numShards*chunkpershard];
+
+                for (int i = 0; i < numChunk; i++)
+                    for (int j = 0; j < numShards; j++)
+                        for (int k = 0; k < chunkpershard; k++) 
+                            newdatainkr[i][j*chunkpershard+k] = datainkr[i][j];
+                
+                cout << "[MYCODE] NEWDATAINKR: with "<< numChunk<< " chunks and "<< chunkpershard<< " ChunkPerShard" << endl;
+                for (int i = 0; i < numChunk; i++)
+                {
+                    cout << "[MYCODE] ";
+                    for (int j = 0; j < numShards*chunkpershard; j++)
+                        cout << newdatainkr[i][j] << "\t";
+                    cout << endl;
+                }
+                
+                HungarianAlgo* algo = new HungarianAlgo();
+                algo->max_cost_assignment(newdatainkr,numChunk,numShards*chunkpershard,assignment);
+                cout << "[MYCODE] LOAD BAlANCE ASSIGNMENT:\n [MYCODE] ";
+                for (int i = 0; i < numChunk; i++)
+                    cout << assignment[i] << "\t";
+                cout << "\n";
+                
+                for (int i = 0; i < numChunk; i++)
+                {
+                    assignment[i] = (int)floor(assignment[i]/chunkpershard);
+                }
+                
+                cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
+                for (int i = 0; i < numChunk; i++)
+                    cout << assignment[i] << "\t";
+                cout << "\n";
+                
+                delete[] newdatainkr;
+                delete algo;
+          }
+
+		    void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[], long long **datainkr)
 			{
 				printf("[MYCODE] RUNALGORITHM\n");
-				long long **datainkr;
-                datainkr = new long long*[numChunk];
-				for (int i = 0; i < numChunk; i++)
-                    datainkr[i] = new long long[numShards];
-
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-						datainkr[i][j] = 0;
 
                 collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
 
