@@ -974,7 +974,7 @@ namespace mongo {
 		        conn->done();
 
                 // 1. Calculate the splits for the new shard key
-                log() << "[MYCODE_TIME] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\tmillis:" << t.millis() << "\n";
+                log() << "[MYCODE_TIME] Resharding Started cmdObj:" << cmdObj.toString() << "\tmillis:" << t.millis() << "\n";
                 BSONObjSet splitPoints; 
                 int numChunk = manager->numChunks();
 
