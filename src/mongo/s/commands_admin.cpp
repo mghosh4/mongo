@@ -48,6 +48,7 @@
 #include "mongo/util/stringutils.h"
 #include "mongo/util/timer.h"
 #include "mongo/util/version.h"
+#include "mongo/util/HungarianAlgo.h"
 
 namespace mongo {
 
@@ -973,7 +974,7 @@ namespace mongo {
 		        conn->done();
 
                 // 1. Calculate the splits for the new shard key
-                log() << "[MYCODE_TIME] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\tmillis:" << t.millis() << "\n";
+                log() << "[MYCODE_TIME] Resharding Started cmdObj:" << cmdObj.toString() << "\tmillis:" << t.millis() << "\n";
                 BSONObjSet splitPoints; 
                 int numChunk = manager->numChunks();
 
@@ -1076,8 +1077,21 @@ namespace mongo {
 
 				// 5. Run the algorithm
 				log() << "[MYCODE_TIME] Running the algorithm" << endl;
+                bool loadBalance = cmdObj["loadBalance"].trueValue();
 				int assignment[numChunk];
-				runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment);
+				long long **datainkr;
+                datainkr = new long long*[numChunk];
+				for (int i = 0; i < numChunk; i++)
+                    datainkr[i] = new long long[numShards];
+
+				for (int i = 0; i < numChunk; i++)
+					for (int j = 0; j < numShards; j++)
+						datainkr[i][j] = 0;
+
+                if (loadBalance)
+                    runLBAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
+                else
+				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
 
 				log() << "[MYCODE_TIME] End of Algorithm Phase:\tmillis:" << t.millis() << endl;
 
@@ -1547,7 +1561,8 @@ namespace mongo {
 				BSONObj info;
 				for (int i = 0; i < numShards; i++)
 				{
-					while(!oplogReader.connect(shards[i]))
+				    cout << "Connecting to: " << shards[i] << endl;
+                	while(!oplogReader.connect(shards[i]))
                     {
                         cout << "[MYCODE] Oplog Reader Connect Failed" << endl;
                     }
@@ -1560,17 +1575,54 @@ namespace mongo {
 				}
 			}
 
-			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[])
+            void runLBAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
+            {
+                printf("[MYCODE] RUN-LOADBALANCE-ALGORITHM\n");
+
+                collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
+                int chunkpershard = (int)ceil((double)numChunk/numShards);
+                long long **newdatainkr = new long long*[numChunk];
+                for (int i = 0; i < numChunk; i++)
+                    newdatainkr[i] = new long long[numShards*chunkpershard];
+
+                for (int i = 0; i < numChunk; i++)
+                    for (int j = 0; j < numShards; j++)
+                        for (int k = 0; k < chunkpershard; k++) 
+                            newdatainkr[i][j*chunkpershard+k] = datainkr[i][j];
+                
+                cout << "[MYCODE] NEWDATAINKR: with "<< numChunk<< " chunks and "<< chunkpershard<< " ChunkPerShard" << endl;
+                for (int i = 0; i < numChunk; i++)
+                {
+                    cout << "[MYCODE] ";
+                    for (int j = 0; j < numShards*chunkpershard; j++)
+                        cout << newdatainkr[i][j] << "\t";
+                    cout << endl;
+                }
+                
+                HungarianAlgo* algo = new HungarianAlgo();
+                algo->max_cost_assignment(newdatainkr,numChunk,numShards*chunkpershard,assignment);
+                cout << "[MYCODE] LOAD BAlANCE ASSIGNMENT:\n [MYCODE] ";
+                for (int i = 0; i < numChunk; i++)
+                    cout << assignment[i] << "\t";
+                cout << "\n";
+                
+                for (int i = 0; i < numChunk; i++)
+                {
+                    assignment[i] = (int)floor(assignment[i]/chunkpershard);
+                }
+                
+                cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
+                for (int i = 0; i < numChunk; i++)
+                    cout << assignment[i] << "\t";
+                cout << "\n";
+                
+                delete[] newdatainkr;
+                delete algo;
+          }
+
+		    void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[], long long **datainkr)
 			{
 				printf("[MYCODE] RUNALGORITHM\n");
-				long long **datainkr;
-                datainkr = new long long*[numChunk];
-				for (int i = 0; i < numChunk; i++)
-                    datainkr[i] = new long long[numShards];
-
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-						datainkr[i][j] = 0;
 
                 collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
 
@@ -1607,8 +1659,20 @@ namespace mongo {
                 		ScopedDbConnection::getScopedDbConnection(
 							replicas[i] ) );
 
-                    long long total = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
-                    cout << "[MYCODE] Shard " << i << " count:" << total << endl;
+                    while(true)
+                    {
+                        try
+                        {
+                            long long total = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+                            cout << "[MYCODE] Shard " << i << " count:" << total << endl;
+                            break;
+                        }
+                        catch(DBException e)
+                        {
+                        	cout << "[MYCODE] Exception trying to populate datainkr: " << e.what() << endl;
+							continue;
+                        }
+                    }
 
                     BSONObjSet::iterator it = splitPoints.begin();
                     BSONObj prev;
@@ -1956,15 +2020,19 @@ namespace mongo {
                 scoped_ptr<ScopedDbConnection> hostConn(
                 	ScopedDbConnection::getScopedDbConnection(
                        	removedReplica ) );
-				try
-				{
-					conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
-					string errmsg = conn->get()->getLastError();
-					cout << "[MYCODE] Replica Return:" << errmsg << endl;
-				}
-				catch(DBException e){
-					cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
-				}
+
+                if (makePrimary)
+                {
+				    try
+				    {
+				    	conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
+				    	string errmsg = conn->get()->getLastError();
+				    	cout << "[MYCODE] Replica Return:" << errmsg << endl;
+				    }
+				    catch(DBException e){
+				    	cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
+				    }
+                }
 
 				try
 				{
