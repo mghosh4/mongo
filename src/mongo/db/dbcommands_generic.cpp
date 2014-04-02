@@ -143,6 +143,7 @@ namespace mongo {
                                            std::vector<Privilege>* out) {} // No auth required
         virtual bool run(const string& badns, BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // IMPORTANT: Don't put anything in here that might lock db - including authentication
+	    log()<< "WWT I get Pinged!"<<endl;
             return true;
         }
     } pingCmd;

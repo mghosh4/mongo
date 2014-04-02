@@ -1507,15 +1507,24 @@ class TestLatencyCommand : public Command {
                                            const BSONObj& cmdObj,
                                            std::vector<Privilege>* out) {
             ActionSet actions;
-            actions.addAction(ActionType::moveData);
+            actions.addAction(ActionType::testLatency);
             out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
         }
 
 
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
 		string to = cmdObj["to"].str();
-		Timer t;
+                string ns = cmdObj["ns"].str();
+		
+		//sleepmillis( 20 );
+                BSONObj res;
 		log() << "TestLatency " <<to<<endl;
+		Timer t;
+		scoped_ptr<ScopedDbConnection> toconn(ScopedDbConnection::getScopedDbConnection(to) );
+		toconn->get()->runCommand( "admin" , 
+				BSON("ping" << ns) ,
+				res
+				);
 		result.append("millis", t.millis());
 		return true;
 	}
@@ -1644,9 +1653,9 @@ class TestLatencyCommand : public Command {
              	BSONObj min = cmdObj.getObjectField( "min" );
              	BSONObj max = cmdObj.getObjectField( "max" );
              	int threads = cmdObj["splitPoints"].Int();
-                //if (threads < 1){
-			threads = 2;
-                //}
+                if (threads < 1){
+			threads = 1;
+                }
 		log() << "[WWT] threads = " <<threads<<endl;
                 log() << "[WWT] min = " << min.toString()<<endl;
                 log() << "[WWT] max =" << max.toString()<<endl;

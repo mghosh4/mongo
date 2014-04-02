@@ -1721,29 +1721,158 @@ namespace mongo {
 						}
 					}
 				}*/
+		
+
+		int **latency;
+                latency = new int*[numShards];
+		for (int i = 0; i < numShards; i++)
+                    	latency[i] = new int[numShards];
+
+		for (int i = 0; i < numShards; i++){
+			for (int j = 0; j < numShards; j++){
+				if(i!=j){
+					BSONObj res;
+					scoped_ptr<ScopedDbConnection> toconn(ScopedDbConnection::getScopedDbConnection(removedReplicas[i] ) );
+
+                			while(true)
+                			{
+						try
+                   			 	{
+                    			    		toconn.reset(ScopedDbConnection::getScopedDbConnection(removedReplicas[i] ) );
+                        		     		break;
+                    				}
+						catch (DBException e)
+						{
+							continue;
+						}
+                			}
+					try
+					{
+						toconn->get()->runCommand( "admin" , 
+							BSON( 	"testLatency" << ns <<
+      							"to" << removedReplicas[j] <<
+							"ns" <<ns
+      							) ,
+							res
+						);
+						latency[i][j]=res["millis"].Int();
+						cout<< "[WWT] from "<<removedReplicas[i] <<" to "<<removedReplicas[j] <<"latency "<< latency[i][j] << "\t";
+					}
+					catch (DBException e)
+					{
+						cout << "[MYCODE] Caught exception while testing latency:" << e.what() << endl;
+					}
+
+                			try
+                			{
+					    toconn->done();
+                			}
+                			catch(DBException e)
+                			{
+                			    cout << "[MYCODE] Caught exception while killing the connection" << endl;
+               				}
+					
+				}
+				else{
+					latency[i][j] = 0;
+				}
+			}
+			cout<<endl;
+		}
+		/*		
+		long long **cost;
+                cost = new long long*[numChunk];
+		for (int i = 0; i < numChunk; i++)
+                    	cost[i] = new long long[numShards];
+
 		long long minData = LLONG_MAX;
 		long long maxData = 0;
 		for (int i = 0; i < numChunk; i++){
 			for (int j = 0; j < numShards; j++){
-				log() << datainkr[i][j]<<"\t";
-				if( minData > datainkr[i][j] && datainkr[i][j]!=0 && j!=assignment[i]){
-					//log() <<"min Change from = " <<minData<<endl;
-					minData = datainkr[i][j];
+				if(j!=assignment[i] && latency[j][assignment[i]] !=0){
+					log() << "latency = " << latency[j][assignment[i]] << "datainkr[i][j] = " <<datainkr[i][j]<<endl;
+					cost[i][j] = latency[j][assignment[i]] * datainkr[i][j];
 				}
-				if (maxData < datainkr[i][j] && datainkr[i][j]!=0 &&j!=assignment[i]){
-					maxData = datainkr[i][j];
+				else{
+					cost[i][j] = datainkr[i][j];
+				}
+				if( minData > cost[i][j] && datainkr[i][j]!=0 && j!=assignment[i]){
+					//log() <<"min Change from = " <<minData<<endl;
+					minData = cost[i][j];
+				}
+				if (maxData < cost[i][j] && datainkr[i][j]!=0 &&j!=assignment[i]){
+					maxData = cost[i][j];
 				}
 			}
 			log() <<endl;
 		}
 		long long unit = minData;
-		if (minData < (maxData/10) ){
-			unit = maxData/10;
+		if (minData < (maxData/3) ){
+			unit = maxData/3;
 		}
 		//long long unit = minData> maxData/10 ? min: maxData/10;
 		log()<<"[WWT] data unit ="<< unit<< " minMigrated Data size = " <<minData << "maxMigrated Data size = "<<maxData <<endl;
+		for (int i = 0; i < numChunk; i++){
+			for (int j = 0; j < numShards; j++){
+				log() << cost[i][j] << "\t";
+			}
+			log()<<endl;
+		}
+	*/
+		
 
 
+		int **threads;
+                threads = new int*[numChunk];
+		for (int i = 0; i < numChunk; i++)
+                    	threads[i] = new int[numShards];
+
+		for (int i = 0; i < numChunk; i++){
+			for (int j = 0; j < numShards; j++){
+				threads[i][j]=1;
+			}
+		}
+		
+		long long **unit;
+                unit = new long long*[numChunk];
+		for (int i = 0; i < numChunk; i++)
+                    	unit[i] = new long long[numShards];
+
+		for (int i = 0; i < numChunk; i++){
+			for (int j = 0; j < numShards; j++){
+				unit[i][j]=datainkr[i][j];
+			}
+		}
+
+		for (int i = 0; i < numChunk; i++){
+			//find the largest unit
+			int max = 0;
+			int max_i = 0;
+			int max_j= 0;
+			for (int i = 0; i < numChunk; i++){
+				for (int j = 0; j < numShards; j++){
+					if(max<unit[i][j] && unit[i][j]!=0 && j!=assignment[i]){
+						max = unit[i][j];
+						max_i=i;
+						max_j=j;
+					}
+					
+				}
+			}
+			//update threads num
+			threads[max_i][max_j]++;
+			unit[max_i][max_j] = datainkr[max_i][max_j]/threads[max_i][max_j];
+			
+		}
+		cout<< "[WWT] threads matrix"<<endl;
+		for (int i = 0; i < numChunk; i++){
+			for (int j = 0; j < numShards; j++){
+				cout<< threads[i][j]<<"\t";
+			}
+			cout<<endl;
+		}
+
+		
 				vector<shared_ptr<boost::thread> > migrateThreads;
 
 				const char *key = proposedKey.firstElement().fieldName();
@@ -1787,9 +1916,11 @@ namespace mongo {
 							{
 											
 								int xy[2]={i,j};
-
+								//cout<< "cost[i][j] " << cost[i][j] << " unit " << unit << endl;
+								//int subThread = (int)(ceil(cost[i][j]/unit));
+								int subThread = threads[i][j];
 								migrateThreads.push_back(shared_ptr<boost::thread>(
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,unit))));
+									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,subThread))));
 							}
 						}
 					}
@@ -1806,7 +1937,7 @@ namespace mongo {
 				}
 			}
 
-			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,long long unit)
+			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,int subThread)
 			{
                 //bool multithread = true;
                 const char *key = proposedKey.firstElement().fieldName();
@@ -1882,7 +2013,7 @@ namespace mongo {
 				cout << "[MYCODE] Range:" << range.toString() << endl;
 				cout << "[MYCODE] Chunk " << i << " moving data from shard " << j << " to " << assignment[i] << endl;
 				cout << "[MYCODE] Source Count: " << sourceCount << " Dest Count: " << dstCount << endl;
-                                cout << "[MYCODe] Threads: "<<(int)round(((double) sourceCount)/unit) << endl;
+                                cout << "[MYCODe] Threads: "<<subThread<< endl;
 
                 BSONObjBuilder b;
                 b.appendAs(min[key], "min");
@@ -1901,7 +2032,7 @@ namespace mongo {
 							"min"<<min<<
                                                         "max"<<max<<
       							"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
-							"splitPoints"<<(int)round(((double) sourceCount)/unit)<<
+							"splitPoints"<<subThread<<
       							"shardId" << Chunk::genID(ns, minID) << 
       							"configdb" << configServer.modelServer() << 
       							"secondaryThrottle" << true <<
