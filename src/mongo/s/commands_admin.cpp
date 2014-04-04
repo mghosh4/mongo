@@ -18,6 +18,7 @@
 
 #include <boost/thread/thread.hpp>
 #include <limits.h>
+#include <map>
 #include "mongo/db/commands.h"
 
 #include "mongo/client/connpool.h"
@@ -1659,6 +1660,20 @@ namespace mongo {
                 BSONObj range = b.done().getOwned();
                 return range;
             }
+            BSONObj getFetchedDataAsBSON(BSONObj range, long long count) 
+            {
+
+                 BSONObjBuilder b;
+                 b.append("count",count);
+
+                 vector<BSONObj> ranges;
+                 ranges.push_back(range);
+                 b.append("ranges",ranges);
+
+                 BSONObj fetchedData = b.done().getOwned();
+		 cout << "[WWT] block=" <<fetchedData.toString()<<endl;
+                 return fetchedData;     
+            }
              void getMinMaxAsBSON(BSONObj range, BSONObj proposedKey, BSONObj& min, BSONObj& max)
              
             {
@@ -1671,26 +1686,24 @@ namespace mongo {
 		cout<<"[WWT] get max="<<maxElem.toString()<<endl;
 
                 if(maxElem.eoo() && minElem.eoo()){
-                      cout<<"both null"<<endl;
+                   
                       max = ShardKeyPattern(proposedKey).globalMax();
                       min = ShardKeyPattern(proposedKey).globalMin();
                 }
                 else if (maxElem.eoo() && !minElem.eoo()){
-                      cout<<"max null"<<endl;
+                      
                       max = ShardKeyPattern(proposedKey).globalMax();
                       BSONObjBuilder b;
                       b.appendAs(minElem, key);
                       min =b.obj();
                 }
                 else if (!maxElem.eoo() && minElem.eoo()){
-			cout<<"min null"<<endl;
                       min = ShardKeyPattern(proposedKey).globalMin();
                       BSONObjBuilder b;
                       b.appendAs(maxElem, key);
                       max =b.obj();
                 }
                 else{
-			cout<<"non null"<<endl;
 		      BSONObjBuilder b1;
                       b1.appendAs(minElem, key);
                       min =b1.obj();
@@ -1873,14 +1886,57 @@ namespace mongo {
 		}
 
 		
-				vector<shared_ptr<boost::thread> > migrateThreads;
+                vector<shared_ptr<boost::thread> > migrateThreads;
 
-				const char *key = proposedKey.firstElement().fieldName();
+                //const char *key = proposedKey.firstElement().fieldName();
+
+		BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
+                BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();                
+                
+                //conversion from arrays to vectors for bundling into bson
+                vector<string> removedReplicasVector(removedReplicas, removedReplicas + numShards);
+                vector<int> assignmentsVector(assignment, assignment + numChunk);
+
+                //conversion from BSONObjSet to BSONObj for bundling into bson
+                vector<BSONObj> points;
+                for(BSONObjSet::iterator point = splitPoints.begin(); point != splitPoints.end(); point++) {
+                    points.push_back(*point);
+                }
+
+		for(int i=0;i< numShards; i++)
+		{
+			
+			BSONObjBuilder params;
+                	params.append("ns", ns);                                            //namespace                           
+                	params.append("numChunks", numChunk);                              //number of chunks
+			params.append("numShards", numShards);
+                	params.append("proposedKey", proposedKey);                          //the proposed key
+			params.append("shardID",i);                                          //shard index
+                	params.append("globalMin", globalMin);                              //global min
+                	params.append("globalMax", globalMax);                              //global max
+                	params.append("splitPoints", points);                               //split points
+                	params.append("assignments", assignmentsVector);                    //the new assignments for chunks
+                	params.append("removedReplicas", removedReplicasVector);            //the other removed replicas
+                
+                	//create an object to encapsulate all the params
+                	BSONObj paramObj = params.obj();                 
+                	cout<<"[WWT] Migrate Command Parameters are "<< paramObj.toString()<<endl;
+		      	migrateThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, paramObj, ns, removedReplicas[i], 1))));
+		}
+
+		for (unsigned i = 0; i < migrateThreads.size(); i++) {
+			migrateThreads[i]->join();
+		}
+
+/*
                 BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
                 BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
                 BSONObjSet::iterator it = splitPoints.begin();
                 BSONObj prev;
 				long long sourceCount;
+
+		std::map<std::pair<int, int>, vector<BSONObj> > flow_pairs;
+		
 
 				for (int i = 0; i < numChunk; i++)
 				{
@@ -1914,13 +1970,23 @@ namespace mongo {
 							
 							if (sourceCount > 0)
 							{
+								std::pair<int, int> key(j,assignment[i]);
+                                                                BSONObj block = getFetchedDataAsBSON(range,sourceCount);
+								if(flow_pairs.find(key) == flow_pairs.end()){
+									vector<BSONObj> blocks;
+									blocks.push_back(block);
+									flow_pairs[key] = blocks;
+								} else {
+									flow_pairs[key].push_back(block);
+								}
 											
-								int xy[2]={i,j};
+								//int xy[2]={i,j};
 								//cout<< "cost[i][j] " << cost[i][j] << " unit " << unit << endl;
 								//int subThread = (int)(ceil(cost[i][j]/unit));
-								int subThread = threads[i][j];
-								migrateThreads.push_back(shared_ptr<boost::thread>(
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,subThread))));
+								//int subThread = threads[i][j];
+								//migrateThreads.push_back(shared_ptr<boost::thread>(
+								//	new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, range, xy  ,assignment, ns, multithread,subThread))));
+								
 							}
 						}
 					}
@@ -1931,21 +1997,68 @@ namespace mongo {
                     	it++;
 					}
 				}
-
+				
+				
+				typedef map<std::pair<int, int>, vector<BSONObj> >::iterator it_type;
+				for(it_type iterator = flow_pairs.begin(); iterator!=flow_pairs.end(); iterator++){
+					vector<BSONObj> blocks = iterator->second;
+					int from = iterator->first.first;
+					int to = iterator->first.second;
+		
+					for(vector<BSONObj>::iterator it=blocks.begin();it!=blocks.end(); it++){
+						cout<<"[WWT] from " << from << " to " <<  to << " blocks: " << *it <<endl;
+						
+					} 
+					migrateThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, proposedKey, blocks,  from , to , ns,1))));
+				}
+				
 				for (unsigned i = 0; i < migrateThreads.size(); i++) {
 					migrateThreads[i]->join();
 				}
-			}
+*/
+			} 
+               
 
-			void singleMigrate(string removedreplicas[], BSONObj proposedKey, BSONObj range, int xy[], int assignment[], const string ns, bool multithread,int subThread)
+			void singleMigrate(BSONObj paramObj, string ns, string to, int numThreads)
 			{
-                //bool multithread = true;
-                const char *key = proposedKey.firstElement().fieldName();
+               
+                //const char *key = proposedKey.firstElement().fieldName();
 		BSONObj res;
+		scoped_ptr<ScopedDbConnection> toconn(
+               		ScopedDbConnection::getScopedDbConnection(to) );
+		cout<< "[WWT] MaxChunkSizeBytes " << Chunk::MaxChunkSize << endl;
+		try
+		{
+			toconn->get()->runCommand( "admin" , 
+						BSON( 	"moveData" << ns <<
+							"para" << paramObj << 
+      							"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
+							"numThreads"<<numThreads<<
+      							"configdb" << configServer.modelServer() << 
+      							"secondaryThrottle" << true 
+      						) ,
+						res
+						);
+		}
+		catch (DBException e)
+		{
+			cout << "[MYCODE] Caught exception while moving data:" << e.what() << endl;
+		}
+
+                try
+                {
+				    toconn->done();
+                }
+                catch(DBException e)
+                {
+                    cout << "[MYCODE] Caught exception while killing the connection" << endl;
+                }
+/*
                 BSONObj min ,max; 
                 getMinMaxAsBSON(range,proposedKey, min, max);
                 int i= xy[0];
 		int j= xy[1];
+
                 scoped_ptr<ScopedDbConnection> toconn(
                		ScopedDbConnection::getScopedDbConnection(
                  		removedreplicas[assignment[i]] ) );
@@ -2014,29 +2127,31 @@ namespace mongo {
 				cout << "[MYCODE] Chunk " << i << " moving data from shard " << j << " to " << assignment[i] << endl;
 				cout << "[MYCODE] Source Count: " << sourceCount << " Dest Count: " << dstCount << endl;
                                 cout << "[MYCODe] Threads: "<<subThread<< endl;
-
-                BSONObjBuilder b;
-                b.appendAs(min[key], "min");
-                BSONObj minID = b.done();
-		cout << "[WWT]single Migrate from = " <<removedreplicas[j]<<endl;
-		cout << "[WWT]single Migrate to = " <<removedreplicas[assignment[i]]<<endl;
+*/
+                //BSONObjBuilder b;
+                //b.appendAs("ranges", ranges);
+                //BSONObj range = b.done();
+		//BSONObjBuilder b;
+                //b.appendAs(min[key], "min");
+                //BSONObj minID = b.done();
+/*
+		cout << "[WWT]single Migrate from = " <<removedreplicas[from]<<endl;
+		cout << "[WWT]single Migrate to = " <<removedreplicas[to]<<endl;
+		
 				try
 				{
 					toconn->get()->runCommand( "admin" , 
 						BSON( 	"moveData" << ns <<
 							"proposedKey" << proposedKey << 
-      							"from" << removedreplicas[j] << 
-      							"to" << removedreplicas[assignment[i]] << 
+      							"from" << removedreplicas[from] << 
+      							"to" << removedreplicas[to] << 
       							/////////////////////////////// 
-      							"range" << range << 
-							"min"<<min<<
-                                                        "max"<<max<<
+      							"blocks" << blocks << 
       							"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
 							"splitPoints"<<subThread<<
-      							"shardId" << Chunk::genID(ns, minID) << 
+      							//"shardId" << Chunk::genID(ns, minID) << 
       							"configdb" << configServer.modelServer() << 
-      							"secondaryThrottle" << true <<
-                                                        "multithread" << multithread
+      							"secondaryThrottle" << true 
       						) ,
 							res
 					);
@@ -2063,6 +2178,7 @@ namespace mongo {
                 {
                     cout << "[MYCODE] Caught exception while killing the connection" << endl;
                 }
+*/
 			}
 
 			void replicaStop(const string ns, int numShards, string removedReplicas[], string primary[], OpTime startTS[], bool collectTS)
