@@ -1107,7 +1107,7 @@ namespace mongo {
 				}
 
 				log() << "[MYCODE_TIME] End of Primary Reconfiguration:\tmillis:" << t.millis() << endl;
-                printCount(splitPoints, ns, replicaSets, numChunk, numShards, proposedKey);
+                //printCount(splitPoints, ns, replicaSets, numChunk, numShards, proposedKey);
 
 				log() << "[MYCODE_TIME] Checking Timestamp before starting secondaries" << endl;
 
@@ -1262,15 +1262,19 @@ namespace mongo {
 				log() << "[MYCODE_TIME] End Migrating Chunk\tmillis:" << t.millis() << endl;
 				log() << "[MYCODE_TIME] End EXECUTION Phase\tmillis:" << t.millis() << endl;
 
+                OpTime firstEndTS[numShards]; 
+                checkTimestamp(primary, numShards, firstEndTS);
+
                 //conversion from array to vector
                 vector<OpTime> currTSVector(currTS, currTS + numShards);
+                vector<OpTime> firstEndTSVector(firstEndTS, firstEndTS + numShards);
                 
                 // 2. Oplog Replay once
                 log() << "[MYCODE_TIME] Replaying Oplog once" << endl;
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, false, currTSVector);
+                            errmsg, true, firstEndTSVector);
 				log() << "[MYCODE_TIME] End First Oplog Replay\tmillis:" << t.millis() << endl;
 
 				// 3. Write Throttle
@@ -1278,17 +1282,17 @@ namespace mongo {
 				replicaThrottle(ns, numShards, primary, true);
 
                 // 4. Oplog Replay again
-                OpTime endTS[numShards]; 
-                checkTimestamp(primary, numShards, endTS);
+                OpTime secondEndTS[numShards]; 
+                checkTimestamp(primary, numShards, secondEndTS);
 
                 //conversion from array to vector
-                vector<OpTime> endTSVector(endTS, endTS + numShards);
+                vector<OpTime> secondEndTSVector(secondEndTS, secondEndTS + numShards);
                 
                 log() << "[MYCODE_TIME] Replaying Oplog again" << endl;
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, true, endTSVector );
+                            errmsg, true, secondEndTSVector );
 				log() << "[MYCODE_TIME] End RECOVERY Phase\tmillis:" << t.millis() << endl;
 
 				if (configUpdate)
