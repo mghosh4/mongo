@@ -1683,6 +1683,65 @@ class TestLatencyCommand : public Command {
                  return fetchedData;     
             }
 
+            void getMinMaxAsBSON(BSONObj range, BSONObj proposedKey, BSONObj& min, BSONObj& max)
+             
+            {
+                const char *key = proposedKey.firstElement().fieldName();
+                BSONObj sub = range[key].Obj();
+                BSONElement maxElem = sub["$lt"];
+                BSONElement minElem = sub["$gte"];
+                cout<<"[WWT] get sub="<<sub.toString()<<endl;
+                cout<<"[WWT] get min="<<minElem.toString()<<endl;
+		cout<<"[WWT] get max="<<maxElem.toString()<<endl;
+
+                if(maxElem.eoo() && minElem.eoo()){
+                   
+                      max = ShardKeyPattern(proposedKey).globalMax();
+                      min = ShardKeyPattern(proposedKey).globalMin();
+                }
+                else if (maxElem.eoo() && !minElem.eoo()){
+                      
+                      max = ShardKeyPattern(proposedKey).globalMax();
+                      BSONObjBuilder b;
+                      b.appendAs(minElem, key);
+                      min =b.obj();
+                }
+                else if (!maxElem.eoo() && minElem.eoo()){
+                      min = ShardKeyPattern(proposedKey).globalMin();
+                      BSONObjBuilder b;
+                      b.appendAs(maxElem, key);
+                      max =b.obj();
+                }
+                else{
+		      BSONObjBuilder b1;
+                      b1.appendAs(minElem, key);
+                      min =b1.obj();
+                      BSONObjBuilder b2;
+                      b2.appendAs(maxElem, key);
+                      max =b2.obj();
+                }
+                
+            }
+ 
+        void print(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets)
+        {
+            typedef map<BSONObj, vector<BSONObj> >::iterator it_type;
+            for(unsigned int i=0;i<threadsBuckets.size();i++)
+            {
+                 std::map<BSONObj, vector<BSONObj> > map1 = threadsBuckets[i];
+                 log() << "[WWT Migrate] bucket[" << i << "] : --------" <<endl;
+		 for(it_type it = map1.begin() ; it!= map1.end(); it++) 
+                 {
+                     log() << "from " << (it->first)["from"].str() << " count " << (it->first)["count"].Long() << endl ;
+                     vector<BSONObj> ranges = it->second;
+                     for (unsigned int j = 0; j< ranges.size() ; j++ ){
+                           log() << "range: " << ranges[j].toString() << "\t";
+                     }
+                     log() << endl;
+                 }
+	    }
+        } 
+
 	void collectFetchedData( vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets,
                                  vector<BSONObj>& splitPoints, vector<int>& assignment, vector<string>& removedReplicas, string& ns,
 				 int& shardID, int& numChunks, int& numShards, 
@@ -1750,7 +1809,7 @@ class TestLatencyCommand : public Command {
 		}//end for
                 
                 //initial  threadsBuckets
-                log() << "[WWT] initial threads buckets" <<endl;
+                //log() << "[WWT] initial threads buckets" <<endl;
                 typedef map<string, vector<BSONObj> >::iterator it_type;
 
 	        for(it_type iterator = fromList.begin(); iterator!=fromList.end(); iterator++){
@@ -1761,7 +1820,7 @@ class TestLatencyCommand : public Command {
                     {
                         totalCount += (*it)["count"].Long();		
                     }
-                    log() << "[WWT] from = " << from << " count = " << totalCount << endl;
+                    //log() << "[WWT] from = " << from << " count = " << totalCount << endl;
                 
                     BSONObjBuilder b;
                     b.append("count", totalCount);
@@ -1774,49 +1833,291 @@ class TestLatencyCommand : public Command {
                 }
 
                 log()<< "[WWT]-------------collect from list -------------------" << endl;
-		typedef map<BSONObj, vector<BSONObj> >::iterator it_type2;
-
-                for(unsigned int i = 0; i < threadsBuckets.size() ; i++ ){
-                    std::map<BSONObj, vector<BSONObj> > fromList = threadsBuckets[i];
-                    log() << "[WWT] bucket["<<i<<"]" << endl;
-
-                    for(it_type2 iterator = fromList.begin(); iterator!=fromList.end(); iterator++){
-		    	vector<BSONObj> ranges = iterator->second;
-		    	BSONObj from = iterator->first;
-
-                    	log() << "[WWT] ---------- from " << from << "----------" <<endl;
-		    	for(vector<BSONObj>::iterator it=ranges.begin();it!=ranges.end(); it++){
-				log()<<"[WWT] ranges: " << (*it).toString() <<endl;			
-                    	} 
-		    }
-                }
+		print(threadsBuckets);
 
 	}
 
 
-	void matchThreadandFromNodes(unsigned int& numThreads, vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets) 
+	void matchThreadandFromNodes(unsigned int& numThreads, vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets, BSONObj proposedKey, string ns,BSONElement maxSizeElem) 
         {
-            
+            /*
+            //strategy 1
             // start matching to guarantee each thread has a map to fetch
             while(threadsBuckets.size() != numThreads ) 
             { 
                 if(threadsBuckets.size() > numThreads) 
                 {
                     //merge the vector
-                    mergeFrom(threadsBuckets);
+                    mergeFromList(threadsBuckets);
                 }
                 else if (threadsBuckets.size() < numThreads)
                 {
+                    //split the vector
+                    splitFromList(threadsBuckets,proposedKey,ns);
                 }
                 else {
                    break;
 		} 
             }
+            */
+            //strategy 2
+            if(threadsBuckets.size() > numThreads) 
+            {
+                    while(threadsBuckets.size() != numThreads ) 
+                    { 
+                        //merge the vector
+                        mergeFromList(threadsBuckets);
+                    }
+            }
+            else if (threadsBuckets.size() < numThreads)
+            {
+                    //split the vector
+                    long long totalCount = 0;
+                    for(unsigned int i =0;i<threadsBuckets.size();i++)
+                    {
+                        totalCount +=(threadsBuckets[i].begin()->first)["count"].Long();
+                    }
+                    
+                    unsigned int threadsArray[threadsBuckets.size()];
+                    vector<vector<map<BSONObj, vector<BSONObj> > > > candidateList;
+                    for(unsigned int i =0;i<threadsBuckets.size();i++)
+                    {
+                        
+                        threadsArray[i] = (int)round(( (double)(threadsBuckets[i].begin()->first)["count"].Long()) / (double)totalCount * numThreads);
+                        log() << "[WWT] threadsArray[" << i <<"]=" << threadsArray[i] 
+                                    <<" count = " << (threadsBuckets[i].begin()->first)["count"].Long() 
+                                    << " totalCount = " << totalCount << endl;
+
+			if(threadsArray[i]==0){
+                            threadsArray[i] = 1;
+                        }
+                        log() << "[WWT] check1" << endl;
+                        vector<map<BSONObj, vector<BSONObj> > > candidate;
+                        log() << "[WWT] check2" << endl;
+                        candidate.push_back(threadsBuckets[i]);
+                        log() << "[WWT] check3" << endl;
+                        while(threadsArray[i]!=candidate.size()){
+                            splitFromList(candidate,proposedKey,ns, maxSizeElem);
+                        } 
+                        log() << "[WWT] check4" << endl;
+                        candidateList.push_back(candidate);
+                    }
+                    threadsBuckets.clear();
+                    for(unsigned int i = 0; i< candidateList.size();i++)
+                    {
+                        vector<map<BSONObj, vector<BSONObj> > > candidate = candidateList[i];
+                        for(unsigned int j = 0; j< candidate.size();j++)
+                        {
+                            threadsBuckets.push_back(candidate[j]);
+                        }
+                    }
+            }
+            else {
+               return;
+	    } 
 	}
 
-        void mergeFrom(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets) {
+	void splitFromList(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets, BSONObj proposedKey, string ns,BSONElement maxSizeElem) {
+            //find the largest from nodes
+            log() << "[WWT Migrate] split begin" << endl;
+            typedef std::map<BSONObj, vector<BSONObj> >::iterator it_type;
+
+            unsigned int l = 0;
+            long long largestCount = 0;
+
+            for(unsigned int i= 0; i < threadsBuckets.size() ; i++)
+            {
+                std::map<BSONObj, vector<BSONObj> > fromList = threadsBuckets[i];
+                long long count = 0;
+                for(it_type it = fromList.begin() ; it!= fromList.end(); it++) 
+                {
+                      count += (it->first)["count"].Long();
+                }
+                if(count > largestCount) 
+                {
+                    largestCount = count;
+                    l = i;
+                }
+            }
+
+            log() << "[WWT Migrate] largestCount = " << largestCount << " in " << l <<endl;
+            //split this largest one and get two new ones
+            std::map<BSONObj, vector<BSONObj> > from1;
+            std::map<BSONObj, vector<BSONObj> > from2;
+
+            if(!splitOneFrom(threadsBuckets[l], from1, from2, proposedKey,ns, maxSizeElem)){
+                  log()<<"[WWT Migrate] something wrong with splitOneFrom" << endl;
+                  return;
+            }
+
+            //delete largest, insert two new ones
+            threadsBuckets.erase(threadsBuckets.begin()+l);
+            threadsBuckets.push_back(from1);
+            threadsBuckets.push_back(from2);
+            
+            log() << "[WWT Migrate] after split :" << endl;
+	    
+        }
+ 
+        bool splitOneFrom(map<BSONObj, vector<BSONObj> >& old, map<BSONObj, vector<BSONObj> >& new1,map<BSONObj, vector<BSONObj> >& new2, BSONObj proposedKey, string ns,BSONElement maxSizeElem)
+        {
+            //we only split the first one of the map because there is only one element in the map in split case
+            // the initial threadsBucket are grouped by from nodes, so there won't be two from nodes in the same map
+           const char *key_char = proposedKey.firstElement().fieldName();
+           string fromStr = (old.begin()->first)["from"].str();
+            //if there is only one range in the map's range vector, we need to send a SplitVector command
+            if(old.begin()->second.size() == 1 ) {
+                //send SplitVector Command
+                BSONObjSet rangeSet;
+                
+                long long count = (old.begin()->first)["count"].Long();
+
+                BSONObj range = (old.begin()->second)[0]["range"].Obj();
+                BSONObj min, max;
+                getMinMaxAsBSON(range, proposedKey, min, max);
+
+                log() << "[WWT Migrate] start split Vector = " << fromStr 
+                      << " key" << proposedKey.toString() 
+                      << " range " << range.toString() 
+                      << " min " << min.toString() 
+                      << " max " << max.toString()<<endl;
+
+                scoped_ptr<ScopedDbConnection> conn(
+                            ScopedDbConnection::getInternalScopedDbConnection(fromStr));
+
+             	BSONObj splitResult;
+             	BSONObjBuilder cmd;
+             	cmd.append( "splitVector" , ns );//TO-DO make sure this is the right ns
+             	cmd.append( "keyPattern" , proposedKey );
+	        cmd.append( "min" , min );
+        	cmd.append( "max" , max );
+             	cmd.append( "range", range);
+             	cmd.append( "maxChunkSizeBytes" , maxSizeElem.Int() );
+             	cmd.append( "maxSplitPoints" , 2);
+             	//cmd.append( "maxChunkObjects" , maxObjs ); don't need this, in SplitVector deal with this
+             	cmd.appendBool( "subSplit" , true);
+             	BSONObj splitCmdObj = cmd.obj();
+        
+             	if ( ! conn->get()->runCommand( "admin" , splitCmdObj , splitResult )) {
+                  conn->done();
+                  log() << "[WWT Migrate] Pick split Vector cmd failed\n";
+                  return false;
+             	}
+        
+            	log() << "[WWT Migrate] Pick split Vector cmd done\n";
+                conn->done();
+                BSONObjBuilder b2;
+                b2.append("from",fromStr);
+                b2.append("count",count/2);
+
+                BSONObj fromNode=b2.done().getOwned();
+   
+
+		BSONObjIterator it( splitResult.getObjectField( "splitKeys" ) );
+             	BSONObj prev;
+             	for(int j = 0; j < 2 ; j++){
+                  BSONObj current;
+                  if(it.more()){
+                         current = it.next().Obj().getOwned();
+                  } else {
+                         current = max;
+                  }
+                  BSONObj local_min = j > 0 ? prev : min;
+		  BSONObj local_max = j == 2-1 ? max : current;
+                  BSONObj range = getRangeAsBSON(key_char, local_min, local_max);
+                  log() << "[WWT Migrate] subRange:" << range.toString() << endl;
+                  
+                  BSONObjBuilder b;
+                  b.append("range",range);
+                  b.append("count",count/2);
+                  vector<BSONObj> ranges;
+                  ranges.push_back(b.done().getOwned());
+
+                  if( j == 0 ) {
+                     new1.insert(std::make_pair(fromNode, ranges));
+                  }
+                  else {
+                     new2.insert(std::make_pair(fromNode, ranges));
+                  }
+                  
+                  rangeSet.insert( range.getOwned() );
+             	  prev = current;
+             	}
+             	
+                log()<<"[WWT_TIME] SplitVector Finish  "<<endl;
+            }
+            else  {
+            //if there is more than one range in the map's range vector, we need to perform Balance Partition algorithm
+            //since N(sum of rows) is much bigger than n(# of ranges), we only use approximation algo(greedy) here
+            //more details in http://en.wikipedia.org/wiki/Partition_problem
+                vector<BSONObj> team = old.begin()->second;
+                vector<BSONObj> team1;
+                vector<BSONObj> team2;
+                //TO-DO sort team
+                std::sort(team.begin(),team.end(), compareRange);
+                
+                long long team1Count=0;
+                long long team2Count=0;
+
+                for(unsigned int i=0;i<team.size(); i++){
+		    if(team1Count<=team2Count){
+                       team1.push_back(team[i]);
+                       team1Count += team[i]["count"].Long(); 
+                    }
+                    else{
+                       team2.push_back(team[i]);
+                       team2Count += team[i]["count"].Long(); 
+                    }                   
+                }
+                BSONObjBuilder b1;
+                b1.append("from",fromStr);
+                b1.append("count",team1Count);
+                BSONObj fromNode1 = b1.done().getOwned();
+                new1.insert(std::make_pair(fromNode1, team1));
+
+                BSONObjBuilder b2;
+                b2.append("from",fromStr);
+                b2.append("count",team2Count);
+                BSONObj fromNode2 = b2.done().getOwned();
+                new2.insert(std::make_pair(fromNode2, team2));
+
+            }
+		typedef std::map<BSONObj, vector<BSONObj> >::iterator it_type;
+		log()<< "[WWT Migrate] new1"<< endl;
+		for(it_type it = new1.begin() ; it!= new1.end(); it++) 
+                 {
+                     log() << "from " << (it->first)["from"].str() << " count " << (it->first)["count"].Long() ;
+                     vector<BSONObj> ranges = it->second;
+                     for (unsigned int j = 0; j< ranges.size() ; j++ ){
+                           log() << "range: " << ranges[j].toString();
+                     }
+                     log() << endl;
+                 }
+
+                
+                log()<< "[WWT Migrate] new2"<< endl;
+		for(it_type it = new2.begin() ; it!= new2.end(); it++) 
+                 {
+                     log() << "from " << (it->first)["from"].str() << " count " << (it->first)["count"].Long() ;
+                     vector<BSONObj> ranges = it->second;
+                     for (unsigned int j = 0; j< ranges.size() ; j++ ){
+                           log() << "range: " << ranges[j].toString();
+                     }
+                     log() << endl;
+                 }
+                 return true;
+        }
+        static bool compareRange(const BSONObj& range1, const BSONObj& range2)
+        {
+            long long count1 = range1["count"].Long();
+            long long count2 = range2["count"].Long();
+           
+            return count1>count2;
+        }
+
+        void mergeFromList(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets) {
             //find the two smallest from nodes
-            log() << "[WWT] merge begin" << endl;
+            log() << "[WWT Migrate] merge begin" << endl;
 	    typedef std::map<BSONObj, vector<BSONObj> >::iterator it_type;
 
             unsigned int s=0;
@@ -1853,8 +2154,8 @@ class TestLatencyCommand : public Command {
 		}
 				
 	    }
-            log() << "[WWT] smallestCount = " << smallestCount << " in " << s <<endl;
- 	    log() << "[WWT] smallestCount2 = " << smallestCount2 << " in " << s2 <<endl;
+            log() << "[WWT Migrate] smallestCount = " << smallestCount << " in " << s <<endl;
+ 	    log() << "[WWT Migrate] smallestCount2 = " << smallestCount2 << " in " << s2 <<endl;
             
             //merge them
 
@@ -1868,28 +2169,15 @@ class TestLatencyCommand : public Command {
             //delete s2
             threadsBuckets.erase(threadsBuckets.begin()+s2);
 
-            log() << "[WWT] new threads Buckets:" << endl;
-	    for(unsigned int i=0;i<threadsBuckets.size();i++)
-            {
-                 std::map<BSONObj, vector<BSONObj> > map1 = threadsBuckets[i];
-                 log() << "[WWT] bucket[" << i << "] : " <<endl;
-		 for(it_type it = map1.begin() ; it!= map1.end(); it++) 
-                 {
-                     log() << "from " << (it->first)["from"].str() << " count " << (it->first)["count"].Long() ;
-                     vector<BSONObj> ranges = it->second;
-                     for (unsigned int j = 0; j< ranges.size() ; j++ ){
-                           log() << "range: " << ranges[i].toString();
-                     }
-                     log() << endl;
-                 }
-	    }
+            log() << "[WWT Migrate] new threads Buckets:" << endl;
+	    print(threadsBuckets);
             
         }
 
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // 1.
             Timer t;
-            log()<<"[WWT] Move Data Starts"<<endl;
+            log()<<"[WWT Migrate] Move Data Starts"<<endl;
 
             BSONObj migrateParams = cmdObj["para"].Obj().getOwned();
 
@@ -1955,7 +2243,8 @@ class TestLatencyCommand : public Command {
              if(numThreads <= 0){
                   numThreads = 1;
              }
-             
+             log() << "[WWT] assign to me threads = " << numThreads << endl;
+
              vector< std::map<BSONObj, vector<BSONObj> > >threadsBuckets;
              //collect fetched data
 	     collectFetchedData(threadsBuckets, splitPoints, assignments, removedReplicas, ns,
@@ -1963,15 +2252,18 @@ class TestLatencyCommand : public Command {
 				 proposedKey, globalMax, globalMin); 
              if(threadsBuckets.empty())
              {
-                 log() << "[WWT] no data need to be migrated to me" << endl;
+                 log() << "[WWT Migrate] no data need to be migrated to me" << endl;
                  return true;
              } 
 
-             matchThreadandFromNodes(numThreads, threadsBuckets);
+             matchThreadandFromNodes(numThreads, threadsBuckets,proposedKey, ns, maxSizeElem);
 
+	    log() << "[WWT Migrate] After matching threads and Buckets:" << endl;
+            print(threadsBuckets);
 	     
+
              vector<shared_ptr<boost::thread> > migrateThreads;
-             for(unsigned int i=0;i<numThreads;i++){
+             for(unsigned int i=0;i<threadsBuckets.size();i++){
                  migrateThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&MoveDataCommand::singleMigrate, this, boost::ref( threadsBuckets[i]) , ns,key, i ))));
              }
 
