@@ -502,6 +502,55 @@ namespace mongo {
         }
     } cmdReplSetRemove;
 
+
+    class CmdGetTags : public ReplSetCommand {
+    private:
+
+    public:
+        virtual void help( stringstream &help ) const {
+            help << "{ {getTags : 1} }";
+            help << "gets tags for each member in the replica set\n";
+            help << "\nhttp://dochub.mongodb.org/core/replicasetcommands";
+        }
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            ActionSet actions;
+            actions.addAction(ActionType::getTags);
+            out->push_back(Privilege(AuthorizationManager::SERVER_RESOURCE_NAME, actions));
+        }
+        CmdGetTags() : ReplSetCommand("getTags") { }
+        
+        virtual bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
+            //check if there is already an error message, if there is return immediately
+            if( !check(errmsg, result) )
+                return false;
+
+            BSONObjBuilder tagsObjBuilder;
+            string key = "dc";
+            cout<<"[MYCODE_HOLLA] Running get tags"<<endl;
+            BSONObj config = theReplSet->getConfig().asBson().getOwned();
+            cout << "[MYCODE_HOLLA] getTags CONFIGPRINT:" << config.toString() << "\n";
+            vector<ReplSetConfig::MemberCfg> configMembers = theReplSet->config().members;
+            for( vector<ReplSetConfig::MemberCfg>::const_iterator i = configMembers.begin(); i != configMembers.end(); i++ ) { 
+                map<string,string> memberTags = i->tags;
+                if(memberTags.find(key) != memberTags.end()){
+                    cout<<"[MYCODE_HOLLA] Machine: "<< i->h.toString(true) << ". Tag value: " << memberTags.find(key)->second << endl;
+                    tagsObjBuilder.append(i->h.toString(true), memberTags.find(key)->second);
+                } else {
+                    cout<<"[MYCODE_HOLLA] All mongods need to have tags for this to work!" <<endl;
+                    return false;
+                }
+            }
+
+            BSONObj tagsObj = tagsObjBuilder.done();
+            result.append("Tags", tagsObj);
+            return true;
+        }
+
+    } cmdGetTags;
+
+
     class CmdReplSetAdd : public ReplSetCommand {
     public:
         virtual void help( stringstream &help ) const {
