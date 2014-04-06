@@ -1140,6 +1140,8 @@ namespace mongo {
             cout<<"==== Replaying ops===="<<endl;
             //TODO GOPAL: Handle error conditions
             //iterate through each op, replaying it
+            int skippedNoOp = 0;
+            int skippedWrongOp = 0;
             for (int i = 1; i < (int)opsToReplay.size(); i++) { //ignore very first one, thats already been executed
                 try {
                     //get the op to replay
@@ -1155,6 +1157,7 @@ namespace mongo {
                     } else {
                         printLogID();
                         cout<<"Did not get op of type string in operation!" << endl;
+                        skippedNoOp++;
                         continue;
                     }
                     //printLogID();
@@ -1168,6 +1171,7 @@ namespace mongo {
                         } else {
                             printLogID();
                             cout<<"Did not get ns of type string in operation!" << endl;
+                            skippedNoOp++;
                             continue;
                         }
                         //printLogID();
@@ -1180,6 +1184,7 @@ namespace mongo {
                         } else {
                             printLogID();
                             cout<<"Did not get o of type object in operation!" << endl;
+                            skippedNoOp++;
                             continue;
                         }
 
@@ -1232,6 +1237,8 @@ namespace mongo {
                             //see which shard the chunk belongs to
                             //replay on corresponding shard
                         }
+                    } else {
+                        skippedWrongOp++;
                     }    
                 } catch (DBException e) {
                     cout<<"Exception when replaying op. Exception is " << e.toString() << endl;
@@ -1239,7 +1246,8 @@ namespace mongo {
                 }
             }    
 
-          
+            printLogID();
+            cout<<"Skipped no op count: " << skippedNoOp << ". Skipped wrong op count: " << skippedWrongOp << endl;
             printLogID();
             cout<<"====replayOps done====="<<endl;
                       

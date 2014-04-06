@@ -1787,9 +1787,22 @@ namespace mongo {
 					{
 						if (j != assignment[i])
 						{
-							scoped_ptr<ScopedDbConnection> fromconn(
-                				ScopedDbConnection::getScopedDbConnection(
-                        			removedReplicas[j] ) );
+							scoped_ptr<ScopedDbConnection> fromconn;
+
+                            while(true)
+                            {
+                                try
+                                {
+                                    fromconn.reset(ScopedDbConnection::getScopedDbConnection(
+                        		    	    removedReplicas[j] ) );
+                                    break;
+                                }
+                                catch(DBException e)
+				            	{
+                                    log() << "[MYCODE] DBConnection failed " << e.what();
+				            		continue;
+				            	}
+                            }
 
 							while (true)
 							{
@@ -1841,6 +1854,7 @@ namespace mongo {
                     }
 					catch (DBException e)
 					{
+                        log() << "[MYCODE] DBConnection failed " << e.what();
 						continue;
 					}
                 }
@@ -1855,14 +1869,14 @@ namespace mongo {
                     }
                     catch(DBException e)
                     {
+                        log() << "[MYCODE] DBConnection failed " << e.what();
                         continue;
                     }
                 }
 
-				long long sourceCount = fromconn->get()->count(ns, range, QueryOption_SlaveOk);
-				long long dstCount = toconn->get()->count(ns, range, QueryOption_SlaveOk);
+				long long sourceCount, dstCount;
 
-				while (true)
+        		while (true)
 				{
 					try
 					{
