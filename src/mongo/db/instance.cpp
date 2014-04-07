@@ -448,37 +448,31 @@ namespace mongo {
                     DbMessage d(m);
                     if (isWriteThrottled(d.getns()))
                     {
-                        BSONObjBuilder b;
                         log() << "[MYCODE] Write Op Throttled" << endl;
-                        b.append("err", "write throttled");
-                        replyToQuery(0, m, dbresponse, b.obj());
-                        return;
+                        uassert(16733, "write throttled", false);
                     }
-                    receivedInsert(m, currentOp);
+                    else
+                        receivedInsert(m, currentOp);
                 }
                 else if ( op == dbUpdate ) {
                     DbMessage d(m);
                     if (isWriteThrottled(d.getns()))
                     {
-                        BSONObjBuilder b;
                         log() << "[MYCODE] Write Op Throttled" << endl;
-                        b.append("err", "write throttled");
-                        replyToQuery(0, m, dbresponse, b.obj());
-                        return;
+                        uassert(16734, "write throttled", false);
                     }
-                    receivedUpdate(m, currentOp);
+                    else
+                        receivedUpdate(m, currentOp);
                 }
                 else if ( op == dbDelete ) {
                     DbMessage d(m);
                     if (isWriteThrottled(d.getns()))
                     {
-                        BSONObjBuilder b;
                         log() << "[MYCODE] Write Op Throttled" << endl;
-                        b.append("err", "write throttled");
-                        replyToQuery(0, m, dbresponse, b.obj());
-                        return;
+                        uassert(16735, "write throttled", false);
                     }
-                    receivedDelete(m, currentOp);
+                    else
+                        receivedDelete(m, currentOp);
                 }
                 else {
                     mongo::log() << "    operation isn't supported: " << op << endl;

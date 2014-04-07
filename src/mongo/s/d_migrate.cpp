@@ -2314,52 +2314,6 @@ class TestLatencyCommand : public Command {
 					{
 					
 						while (cursor->more()) {
-							range_count++;
-							o = cursor->next().getOwned();
-							//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
-        						{
-                                        
-            						PageFaultRetryableSection pgrs;
-	        	    				while ( 1 ) {
-    	    	        					try {
-									Lock::DBWrite r(ns);
-									Client::Context context(ns);
-									theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
-            	        						break;
-            	    						}
-            	    						catch ( PageFaultException& e ) {
-            	        						e.touch();
-            	    						}
-            						}
-        					}
-					}
-						break;
-					}
-					catch (DBException e)
-					{
-						log() << "Last BSONObj before crash:" << o.toString() << endl;
-
-						BSONObjBuilder b;
-						BSONObjBuilder sub(b.subobjStart(key));
-						sub.appendAs(o[key], "$gt");
-						BSONObj rangeVal = qRange[key].Obj();
-						if (!rangeVal["$lt"].eoo())
-							sub.append(rangeVal["$lt"]);
-						BSONObj subObj = sub.done();
-						qRange = b.done().getOwned();
-					}
-				}
-                		catch (DBException e)
-                		{
-                	    		log() << "[MYCODE] DBClientCursor call failed" << endl;
-               		 	}
-			
-			 }//end while(1)
-                         from_count+=range_count;
-                         log() << "[WWT] Fetch data in range " <<qRange.toString() << " count " << range_count << endl; 
-                         //remove remote data
-                         while (true)
-			 {
 				try
 				{
 					fromConn->get()->remove(ns, qRange);

@@ -751,7 +751,7 @@ namespace mongo {
                 out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
             }
             bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
-				Timer t;
+                Timer t;
                 const string ns = cmdObj.firstElement().valuestrsafe();
                 if ( ns.size() == 0 ) {
                     errmsg = "no ns";
@@ -976,7 +976,7 @@ namespace mongo {
 		        conn->done();
 
                 // 1. Calculate the splits for the new shard key
-                log() << "[MYCODE_TIME] Split Chunks min:" << proposedShardKey.globalMin() << "\tmax:" << proposedShardKey.globalMax() << "\tmillis:" << t.millis() << "\n";
+                log() << "[MYCODE_TIME] Resharding Started cmdObj:" << cmdObj.toString() << "\tmillis:" << t.millis() << "\n";
                 BSONObjSet splitPoints; 
                 int numChunk = manager->numChunks();
 
@@ -1036,8 +1036,12 @@ namespace mongo {
 				shardconn->done();
 
 				string **replicaSets = new string*[numHosts];
-				for (int i = 0; i < numHosts; i++)
+				for (int i = 0; i < numHosts; i++){
 					replicaSets[i] = new string[numShards];
+                    for(int j = 0; j < numShards; j++){
+                        replicaSets[i][j] = "";
+                    }
+                }
 				collectReplicas(replicaSets, shards, numShards);
 				log() << "[MYCODE_TIME] Replicas Collected" << endl;
 
@@ -1094,6 +1098,12 @@ namespace mongo {
                                     runLBAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment,datainkr);
                                 else
 				    runAlgorithm(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, assignment, datainkr);
+
+				log() << "[MYCODE_TIME] End of Algorithm Phase:\tmillis:" << t.millis() << endl;
+
+                // 6. Reconfiguring the first set of replicas
+				log() << "[MYCODE_TIME] Reconfiguring first set of hosts" << endl;
+
 
 				log() << "[MYCODE_TIME] End of Algorithm Phase:\tmillis:" << t.millis() << endl;
 
@@ -1265,15 +1275,19 @@ namespace mongo {
 				log() << "[MYCODE_TIME] End Migrating Chunk\tmillis:" << t.millis() << endl;
 				log() << "[MYCODE_TIME] End EXECUTION Phase\tmillis:" << t.millis() << endl;
 
+                OpTime firstEndTS[numShards]; 
+                checkTimestamp(primary, numShards, firstEndTS);
+
                 //conversion from array to vector
                 vector<OpTime> currTSVector(currTS, currTS + numShards);
+                vector<OpTime> firstEndTSVector(firstEndTS, firstEndTS + numShards);
                 
                 // 2. Oplog Replay once
                 log() << "[MYCODE_TIME] Replaying Oplog once" << endl;
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, false, currTSVector);
+                            errmsg, true, firstEndTSVector);
 				log() << "[MYCODE_TIME] End First Oplog Replay\tmillis:" << t.millis() << endl;
 
 				// 3. Write Throttle
@@ -1281,17 +1295,17 @@ namespace mongo {
 				replicaThrottle(ns, numShards, primary, true);
 
                 // 4. Oplog Replay again
-                OpTime endTS[numShards]; 
-                checkTimestamp(primary, numShards, endTS);
+                OpTime secondEndTS[numShards]; 
+                checkTimestamp(primary, numShards, secondEndTS);
 
                 //conversion from array to vector
-                vector<OpTime> endTSVector(endTS, endTS + numShards);
+                vector<OpTime> secondEndTSVector(secondEndTS, secondEndTS + numShards);
                 
                 log() << "[MYCODE_TIME] Replaying Oplog again" << endl;
                 replayOplog(ns, proposedKey, splitPoints, 
                             numShards, primary, removedReplicas, currTSVector, 
                             numChunk, assignment, 
-                            errmsg, true, endTSVector );
+                            errmsg, true, secondEndTSVector );
 				log() << "[MYCODE_TIME] End RECOVERY Phase\tmillis:" << t.millis() << endl;
 
 				if (configUpdate)
@@ -1432,30 +1446,103 @@ namespace mongo {
 			void collectReplicas(string** replicaSets, vector<Shard> newShards, int numShards)
 			{
 				BSONObj info;
-				int hostNum;
-				for (int i = 0; i < numShards; i++)
-				{
-					hostNum = 0;
-					printf("[MYCODE] MYCUSTOMPRINT: %s\n", newShards[i].getConnString().c_str());
-                	scoped_ptr<ScopedDbConnection> conn(
-                		ScopedDbConnection::getScopedDbConnection(
-                        	newShards[i].getConnString() ) );
+                BSONObj tagCmdResults;
+                
+                map<string, vector<int> > tagMap;
+                int maxMappedNum = 0;
 
-					conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
-					string primaryStr = info["primary"].String();
+                int hostNum;
+                for (int i = 0; i < numShards; i++)
+                {
+                    hostNum = 0;
+                    printf("[MYCODE] MYCUSTOMPRINT: %s\n", newShards[i].getConnString().c_str());
+                    scoped_ptr<ScopedDbConnection> conn(
+                        ScopedDbConnection::getScopedDbConnection(
+                            newShards[i].getConnString() ) );
 
-					BSONObjIterator iter(info["hosts"].Obj());
-					while (iter.more())
-					{
-						string hostName = iter.next().String();
-						if (primaryStr.compare(hostName))
-							replicaSets[hostNum++][i] = hostName;
-					}
-					replicaSets[hostNum][i] = primaryStr;
+                    conn->get()->runCommand("admin", BSON("isMaster" << 1), info);
+                    string primaryStr = info["primary"].String();
+                    
+                    conn->get()->runCommand("admin", BSON("getTags" << 1), tagCmdResults);
+                    string DC = getDC(primaryStr, tagCmdResults);
+                    if(DC != "" && i == 0){
+                       vector<int> indices;
+                       indices.push_back(maxMappedNum);
+                       maxMappedNum++;
+                       tagMap.insert(pair<string, vector<int> >(DC, indices));
+                    } 
 
-					conn->done();
-				}
+                    BSONObjIterator iter(info["hosts"].Obj());
+                    while (iter.more())
+                    {
+                        string hostName = iter.next().String();
+                        if (primaryStr.compare(hostName)) {
+                            string DC = getDC(hostName, tagCmdResults);
+                            if(i == 0 && DC != ""){
+                                if(tagMap.find(DC) == tagMap.end()){//tag not seen at all
+                                    vector<int> indices;
+                                    indices.push_back(maxMappedNum);
+                                    maxMappedNum++;
+                                    tagMap.insert(pair<string, vector<int> >(DC, indices));
+                                } else {//tag seen but check if spots are empty
+                                    bool spotsEmpty = false;
+                                    vector<int> possibleIndices = tagMap.find(DC)->second;
+                                    for(int index = 0; index < (int)possibleIndices.size(); index++){
+                                        int pos = possibleIndices[index];
+                                        if(replicaSets[pos][i] == ""){
+                                            spotsEmpty = true;
+                                            break;
+                                        }
+                                    }
+                                    if(!spotsEmpty){//not enough spots
+                                        //make some spots
+                                        possibleIndices.push_back(maxMappedNum);
+                                        maxMappedNum++;
+                                        tagMap.erase(tagMap.find(DC));
+                                        tagMap.insert(pair<string, vector<int> >(DC, possibleIndices));
+                                    }
+                                }
+                            }
+                            
+                            if(DC != ""){     
+                                vector<int> possibleIndices = tagMap.find(DC)->second;
+                                for(int index = 0; index < (int)possibleIndices.size(); index++){
+                                    int pos = possibleIndices[index];
+                                    if(replicaSets[pos][i] == ""){
+                                        cout << "[MYCODE_HOLLA] Hostname:  " << hostName << " Index: " << pos << endl;
+                                        replicaSets[pos][i] = hostName;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                replicaSets[hostNum][i] = hostName;
+                            }
+                            hostNum++;
+                        }
+                    }
+                    replicaSets[hostNum][i] = primaryStr;
+
+                    cout << "[MYCODE_HOLLA] Hostnum at the end: " << hostNum << endl;
+                    for(int i = 0; i < 3; i++){
+                        cout<< "[MYCODE_HOLLA] Replica set " << i << ": ";
+                        for(int j = 0; j < numShards; j++){
+                            cout << replicaSets[i][j] << " ";
+                        }
+                    }
+                    conn->done();
+                }
+
 			}
+
+            string getDC(string hostName, BSONObj tagCmdResults){
+                string DC = "";
+                if(!tagCmdResults["Tags"].eoo() && !tagCmdResults["Tags"].Obj()[hostName].eoo()){
+                    DC = tagCmdResults["Tags"].Obj()[hostName].valuestrsafe();
+                }
+
+                cout << "[MYCODE_HOLLA] Hostname:  " << hostName << " DC: " << DC << endl;
+                return DC;
+            }
 
 			void collectIDs(vector<Shard> newShards, int numShards, map<string, int>& hostIDMap)
 			{
@@ -1491,7 +1578,8 @@ namespace mongo {
 				BSONObj info;
 				for (int i = 0; i < numShards; i++)
 				{
-					while(!oplogReader.connect(shards[i]))
+				    cout << "Connecting to: " << shards[i] << endl;
+                	while(!oplogReader.connect(shards[i]))
                     {
                         cout << "[MYCODE] Oplog Reader Connect Failed" << endl;
                     }
@@ -1504,10 +1592,54 @@ namespace mongo {
 				}
 			}
 
-			void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
+            void runLBAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
+            {
+                printf("[MYCODE] RUN-LOADBALANCE-ALGORITHM\n");
+
+                collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
+                int chunkpershard = (int)ceil((double)numChunk/numShards);
+                long long **newdatainkr = new long long*[numChunk];
+                for (int i = 0; i < numChunk; i++)
+                    newdatainkr[i] = new long long[numShards*chunkpershard];
+
+                for (int i = 0; i < numChunk; i++)
+                    for (int j = 0; j < numShards; j++)
+                        for (int k = 0; k < chunkpershard; k++) 
+                            newdatainkr[i][j*chunkpershard+k] = datainkr[i][j];
+                
+                cout << "[MYCODE] NEWDATAINKR: with "<< numChunk<< " chunks and "<< chunkpershard<< " ChunkPerShard" << endl;
+                for (int i = 0; i < numChunk; i++)
+                {
+                    cout << "[MYCODE] ";
+                    for (int j = 0; j < numShards*chunkpershard; j++)
+                        cout << newdatainkr[i][j] << "\t";
+                    cout << endl;
+                }
+                
+                HungarianAlgo* algo = new HungarianAlgo();
+                algo->max_cost_assignment(newdatainkr,numChunk,numShards*chunkpershard,assignment);
+                cout << "[MYCODE] LOAD BAlANCE ASSIGNMENT:\n [MYCODE] ";
+                for (int i = 0; i < numChunk; i++)
+                    cout << assignment[i] << "\t";
+                cout << "\n";
+                
+                for (int i = 0; i < numChunk; i++)
+                {
+                    assignment[i] = (int)floor(assignment[i]/chunkpershard);
+                }
+                
+                cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
+                for (int i = 0; i < numChunk; i++)
+                    cout << assignment[i] << "\t";
+                cout << "\n";
+                
+                delete[] newdatainkr;
+                delete algo;
+          }
+
+		    void runAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[], long long **datainkr)
 			{
 				printf("[MYCODE] RUNALGORITHM\n");
-				
 
                 collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
 
@@ -1532,53 +1664,6 @@ namespace mongo {
 
                 
 			}
-                        void runLBAlgorithm(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, int assignment[],long long **datainkr)
-			{
-				printf("[WWT] RUN-LOADBALANCE-ALGORITHM\n");
-				
-
-                collectData(splitPoints, ns, replicas, numChunk, numShards, proposedKey, datainkr);
-                int chunkpershard = (int)ceil((double)numChunk/numShards);
-                long long **newdatainkr = new long long*[numChunk];
-                                for (int i = 0; i < numChunk; i++)
-                    newdatainkr[i] = new long long[numShards*chunkpershard];
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-                                               for (int k = 0; k < chunkpershard; k++) 
-						       newdatainkr[i][j*chunkpershard+k] = datainkr[i][j];
-				
-				cout << "[WWT] NEWDATAINKR: with "<< numChunk<< " chunks and "<< chunkpershard<< " ChunkPerShard" << endl;
-				for (int i = 0; i < numChunk; i++)
-				{
-					cout << "[WWT] ";
-					for (int j = 0; j < numShards*chunkpershard; j++)
-						cout << newdatainkr[i][j] << "\t";
-					cout << endl;
-				}
-
-				
-				HungarianAlgo* algo = new HungarianAlgo();
-				algo->max_cost_assignment(newdatainkr,numChunk,numShards*chunkpershard,assignment);
-				cout << "[WWT] LOAD BAlANCE ASSIGNMENT:\n [MYCODE] ";
-				for (int i = 0; i < numChunk; i++)
-					cout << assignment[i] << "\t";
-				cout << "\n";
-
-				for (int i = 0; i < numChunk; i++)
-				{
-					assignment[i] = (int)floor(assignment[i]/chunkpershard);
-				}
-
-				cout << "[MYCODE] ASSIGNMENT:\n [MYCODE] ";
-				for (int i = 0; i < numChunk; i++)
-					cout << assignment[i] << "\t";
-				cout << "\n";
-
-                
-                delete[] newdatainkr;
-                delete algo;
-			}
-		
             void collectData(BSONObjSet splitPoints, string ns, string replicas[], int numChunk, int numShards, BSONObj proposedKey, long long **datainkr)
             {
 			    const char *key = proposedKey.firstElement().fieldName();
@@ -1590,8 +1675,20 @@ namespace mongo {
                 		ScopedDbConnection::getScopedDbConnection(
 							replicas[i] ) );
 
-                    long long total = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
-                    cout << "[MYCODE] Shard " << i << " count:" << total << endl;
+                    while(true)
+                    {
+                        try
+                        {
+                            long long total = conn->get()->count(ns, BSONObj(), QueryOption_SlaveOk);
+                            cout << "[MYCODE] Shard " << i << " count:" << total << endl;
+                            break;
+                        }
+                        catch(DBException e)
+                        {
+                        	cout << "[MYCODE] Exception trying to populate datainkr: " << e.what() << endl;
+							continue;
+                        }
+                    }
 
                     BSONObjSet::iterator it = splitPoints.begin();
                     BSONObj prev;
@@ -1917,9 +2014,22 @@ namespace mongo {
 					{
 						if (j != assignment[i])
 						{
-							scoped_ptr<ScopedDbConnection> fromconn(
-                				ScopedDbConnection::getScopedDbConnection(
-                        			removedReplicas[j] ) );
+							scoped_ptr<ScopedDbConnection> fromconn;
+
+                            while(true)
+                            {
+                                try
+                                {
+                                    fromconn.reset(ScopedDbConnection::getScopedDbConnection(
+                        		    	    removedReplicas[j] ) );
+                                    break;
+                                }
+                                catch(DBException e)
+				            	{
+                                    log() << "[MYCODE] DBConnection failed " << e.what();
+				            		continue;
+				            	}
+                            }
 
 							while (true)
 							{
@@ -2044,6 +2154,7 @@ namespace mongo {
                     }
 					catch (DBException e)
 					{
+                        log() << "[MYCODE] DBConnection failed " << e.what();
 						continue;
 					}
                 }
@@ -2059,6 +2170,7 @@ namespace mongo {
                     }
                     catch(DBException e)
                     {
+                        log() << "[MYCODE] DBConnection failed " << e.what();
                         continue;
                     }
                 }
@@ -2201,7 +2313,7 @@ namespace mongo {
 				cout << "[MYCODE] hostIDMap size:" << hostIDMap.size() << endl;
 
 				int hostID = -1;
-                                vector<shared_ptr<boost::thread> > returnThreads;
+				vector<shared_ptr<boost::thread> > returnThreads;
 
 				for (int i = 0; i < numShards; i++)
 				{
@@ -2237,15 +2349,19 @@ namespace mongo {
                 scoped_ptr<ScopedDbConnection> hostConn(
                 	ScopedDbConnection::getScopedDbConnection(
                        	removedReplica ) );
-				try
-				{
-					conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
-					string errmsg = conn->get()->getLastError();
-					cout << "[MYCODE] Replica Return:" << errmsg << endl;
-				}
-				catch(DBException e){
-					cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
-				}
+
+                if (makePrimary)
+                {
+				    try
+				    {
+				    	conn->get()->runCommand("admin", BSON("replSetAdd" << removedReplica << "primary" << makePrimary << "id" << hostID), info);
+				    	string errmsg = conn->get()->getLastError();
+				    	cout << "[MYCODE] Replica Return:" << errmsg << endl;
+				    }
+				    catch(DBException e){
+				    	cout << "[MYCODE] adding replica" << " threw exception: " << e.toString() << endl;
+				    }
+                }
 
 				try
 				{

@@ -79,6 +79,7 @@
 "replSetStepDown",
 "replSetSyncFrom",
 "replayOplog",
+"getTags",
 "resync",
 "serverStatus",
 "setParameter",

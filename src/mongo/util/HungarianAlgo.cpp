@@ -7,18 +7,19 @@
 void HungarianAlgo::max_cost_assignment(long long ** datainkr, int numRow, int numColumn,int assignment[])
 {
 
+
 	#ifdef DEBUG
 	//std::cout << "Munkres input matrix:" << std::endl;
 	  for (  int row = 0 ; row < numRow ; row++ ) {
 	    for (  int col = 0 ; col < numColumn ; col++ ) {
               datainkr[row][col]=0-datainkr[row][col];
-	      //std::cout.width(8);
-	      //std::cout << datainkr[row][col] << ",";
+	      std::cout.width(8);
+	      std::cout << datainkr[row][col] << ",";
               
 	    }
-	    //std::cout << std::endl;
+	    std::cout << std::endl;
 	  }
-	  //std::cout << std::endl;
+	 std::cout << std::endl;
 	#endif
         
 	min_cost_assignment(datainkr,numRow,numColumn,assignment);
@@ -55,7 +56,9 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
         }
     }
     if (numRow != numColumn ){
+
 	int smaller=numRow>numColumn?numColumn:numRow;
+
        //find the largest number in the matrix
        int max_cost = datainkr[0][0];
        for (int r = 0;r<numRow;r++)
@@ -68,6 +71,7 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
            }
        }
     }
+
 	#ifdef DEBUG
 	std::cout << "Cost input matrix:" << std::endl;
 	  for (  int row = 0 ; row < nrow ; row++ ) {
@@ -100,7 +104,6 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     for (int i = 0; i < nrow; i++)
     {
         mask[i] = new int[ncol];
-	
     }
     
     for (int i = 0; i < nrow; i++)
@@ -126,12 +129,13 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     main_algorithm(result);
     if(flip){
         for(int c = 0;c<numColumn;c++){
+
 	     assignment[result[c]]=c;
         }
     } else {
         for(int c = 0;c<numRow;c++){
 	     assignment[c]=result[c];
-        }
+      }
     }
    delete result;
 }
@@ -147,8 +151,8 @@ void HungarianAlgo::main_algorithm(int result[])
     while(!done)
     {
         #ifdef DEBUG
-	std::cout << "step:" << step <<std::endl;
-        #endif
+    std::cout << "step:" << step <<std::endl;
+    #endif
 
         switch(step)
         {
@@ -176,35 +180,36 @@ void HungarianAlgo::main_algorithm(int result[])
                     break;
         }
         //showCostMatrix();
-	#ifdef DEBUG
-	std::cout << "Cost matrix:" << std::endl;
-	  for (  int row = 0 ; row < nrow ; row++ ) {
-	    for (  int col = 0 ; col < ncol ; col++ ) {
-	      std::cout.width(8);
+    #ifdef DEBUG
+    std::cout << "Cost matrix:" << std::endl;
+      for (  int row = 0 ; row < nrow ; row++ ) {
+        for (  int col = 0 ; col < ncol ; col++ ) {
+          std::cout.width(8);
               if (mask[row][col] == 1 )
-	          std::cout << this->cost[row][col] <<"*"<< ",";
+              std::cout << this->cost[row][col] <<"*"<< ",";
               else if (mask[row][col] == 2 )
-	          std::cout << this->cost[row][col] <<"'"<< ",";
+              std::cout << this->cost[row][col] <<"'"<< ",";
               else
-	          std::cout << this->cost[row][col] << ",";
-	    }
-	    std::cout << std::endl;
-	  }
-	  std::cout << std::endl;
+              std::cout << this->cost[row][col] << ",";
+        }
+        std::cout << std::endl;
+      }
+      std::cout << std::endl;
        
-	std::cout << "row cover:" << std::endl;
-	  for (  int row = 0 ; row < nrow ; row++ ) {
-	      std::cout.width(8);
-	      std::cout << this->RowCover[row] << ",";
-	  }
-	  std::cout << std::endl;
-	std::cout << "col cover:" << std::endl;
-	  for (  int col = 0 ; col < ncol ; col++ ) {
-	      std::cout.width(8);
-	      std::cout << this->ColCover[col] << ",";
-	  }
-	  std::cout << std::endl;
-	#endif
+    std::cout << "row cover:" << std::endl;
+      for (  int row = 0 ; row < nrow ; row++ ) {
+          std::cout.width(8);
+          std::cout << this->RowCover[row] << ",";
+      }
+      std::cout << std::endl;
+    std::cout << "col cover:" << std::endl;
+      for (  int col = 0 ; col < ncol ; col++ ) {
+          std::cout.width(8);
+          std::cout << this->ColCover[col] << ",";
+      }
+      std::cout << std::endl;
+    #endif
+>>>>>>> upstream/master
     }
 
     for (int i=0;i<nrow;i++) 
@@ -342,8 +347,8 @@ void HungarianAlgo::find_a_zero(int* row, int* col)
                   *col = c;
                   done = true;
              }
-	     c += 1;
-             if(c>=ncol ||done )
+         c += 1;
+        if(c>=ncol ||done )
                 break;
          }
          r+=1;
@@ -373,8 +378,8 @@ void HungarianAlgo::find_star_in_row(int row, int* col)
         if(mask[row][c]==1)
         {
             *col = c;
-	}
     }
+ }
 }
 void HungarianAlgo::step_five(int* step)
 {
@@ -389,7 +394,7 @@ void HungarianAlgo::step_five(int* step)
     
     while (!done)
     {
-	find_star_in_col(path[path_count - 1][1], &r);
+    find_star_in_col(path[path_count - 1][1], &r);
         if (r > -1)
         {
             path_count += 1;
@@ -484,4 +489,5 @@ void HungarianAlgo::step_seven(int* step)
     std::cout<<"\n\n---------Run Complete----------"<<std::endl;
     #endif
 }
+
 

@@ -2,9 +2,9 @@ class HungarianAlgo{
 public: 
    void max_cost_assignment(long long ** datainkr, int numRow, int numColumn, int assignment[]);
    ~HungarianAlgo(){
-	delete[] cost;
-	delete[] mask;
-	delete[] path;
+    delete[] cost;
+    delete[] mask;
+    delete[] path;
    }
    void min_cost_assignment(long long ** datainkr, int numRow, int numColumn, int assignment[]);
 private:
