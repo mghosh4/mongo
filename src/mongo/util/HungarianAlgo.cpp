@@ -7,14 +7,13 @@
 void HungarianAlgo::max_cost_assignment(long long ** datainkr, int numRow, int numColumn,int assignment[])
 {
 
-
 	#ifdef DEBUG
-	//std::cout << "Munkres input matrix:" << std::endl;
+	std::cout << "Munkres input matrix:" << std::endl;
 	  for (  int row = 0 ; row < numRow ; row++ ) {
 	    for (  int col = 0 ; col < numColumn ; col++ ) {
               datainkr[row][col]=0-datainkr[row][col];
-	      std::cout.width(8);
-	      std::cout << datainkr[row][col] << ",";
+              std::cout.width(8);
+              std::cout << datainkr[row][col] << ",";
               
 	    }
 	    std::cout << std::endl;
@@ -22,7 +21,7 @@ void HungarianAlgo::max_cost_assignment(long long ** datainkr, int numRow, int n
 	 std::cout << std::endl;
 	#endif
         
-	min_cost_assignment(datainkr,numRow,numColumn,assignment);
+        min_cost_assignment(datainkr,numRow,numColumn,assignment);
 }
 void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int numColumn, int assignment[])
 {
@@ -56,9 +55,7 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
         }
     }
     if (numRow != numColumn ){
-
 	int smaller=numRow>numColumn?numColumn:numRow;
-
        //find the largest number in the matrix
        int max_cost = datainkr[0][0];
        for (int r = 0;r<numRow;r++)
@@ -71,7 +68,6 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
            }
        }
     }
-
 	#ifdef DEBUG
 	std::cout << "Cost input matrix:" << std::endl;
 	  for (  int row = 0 ; row < nrow ; row++ ) {
@@ -79,12 +75,11 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
 	      std::cout.width(8);
 	      std::cout << cost[row][col] << ",";
               
-	    }
+            }
 	    std::cout << std::endl;
-	  }
+          }
 	  std::cout << std::endl;
 	#endif
-
    
     mask = new int *[nrow];
     path = new int *[2 * nrow +1];
@@ -104,6 +99,7 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     for (int i = 0; i < nrow; i++)
     {
         mask[i] = new int[ncol];
+
     }
     
     for (int i = 0; i < nrow; i++)
@@ -129,8 +125,7 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     main_algorithm(result);
     if(flip){
         for(int c = 0;c<numColumn;c++){
-
-	     assignment[result[c]]=c;
+            assignment[result[c]]=c;
         }
     } else {
         for(int c = 0;c<numRow;c++){
@@ -152,7 +147,7 @@ void HungarianAlgo::main_algorithm(int result[])
     {
         #ifdef DEBUG
     std::cout << "step:" << step <<std::endl;
-    #endif
+        #endif
 
         switch(step)
         {
@@ -209,7 +204,6 @@ void HungarianAlgo::main_algorithm(int result[])
       }
       std::cout << std::endl;
     #endif
->>>>>>> upstream/master
     }
 
     for (int i=0;i<nrow;i++) 
@@ -378,8 +372,8 @@ void HungarianAlgo::find_star_in_row(int row, int* col)
         if(mask[row][c]==1)
         {
             *col = c;
+        }
     }
- }
 }
 void HungarianAlgo::step_five(int* step)
 {
