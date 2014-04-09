@@ -815,7 +815,7 @@ namespace mongo {
 
             //printLogID();
             //cout<<"====running replayOplog====="<<endl;
-            int iterations = 10;            //number of times to iterate
+            int iterations = 1;            //number of times to iterate
             bool done = false;              //are we done yet?
             BSONObj prevlastOp = BSONObj(); //operation checking
 
