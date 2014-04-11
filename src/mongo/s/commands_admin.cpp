@@ -1510,7 +1510,7 @@ namespace mongo {
                     replicaSets[hostNum][i] = primaryStr;
 
                     cout << "[MYCODE_HOLLA] Hostnum at the end: " << hostNum << endl;
-                    for(int i = 0; i < 3; i++){
+                    for(int i = 0; i <= hostNum; i++){
                         cout<< "[MYCODE_HOLLA] Replica set " << i << ": ";
                         for(int j = 0; j < numShards; j++){
                             cout << replicaSets[i][j] << " ";
