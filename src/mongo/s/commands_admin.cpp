@@ -1078,7 +1078,7 @@ namespace mongo {
 					primaryReplicas[i] = replicaSets[numHosts - 1][i];
 
                 // Range Adjustment
-			    long long **rangecount;
+			    /*long long **rangecount;
                 rangecount = new long long*[numChunk];
 				for (int i = 0; i < numChunk; i++)
                     rangecount[i] = new long long[numShards];
@@ -1134,7 +1134,7 @@ namespace mongo {
                 splitPoints = finalPoints;
 				numChunk = splitPoints.size() + 1;
                 for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
-                    log() << "[MYCODE] Split Points:" << it->toString() << endl;
+                    log() << "[MYCODE] Split Points:" << it->toString() << endl;*/
 
                 // 4. Stopping the first set of replicas
 				OpTime currTS[numShards];
@@ -1885,8 +1885,9 @@ namespace mongo {
 							
 							if (sourceCount > 0)
 							{
+				                cout << "[MYCODE] Chunk " << i << " moving data from shard " << j << " to " << assignment[i] << endl;
 								migrateThreads.push_back(shared_ptr<boost::thread>(
-									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas, range, key, min, i, j, assignment, ns))));
+									new boost::thread (boost::bind(&ReShardCollectionCmd::singleMigrate, this, removedReplicas[j], removedReplicas[assignment[i]], proposedKey, min, max, range, ns))));
 							}
 						}
 					}
@@ -1903,7 +1904,7 @@ namespace mongo {
 				}
 			}
 
-			void singleMigrate(string removedreplicas[], BSONObj range, const char *key, BSONObj min, int i, int j, int assignment[], const string ns)
+			void singleMigrate(string from, string to, BSONObj key, BSONObj min, BSONObj max, BSONObj range, const string ns)
 			{
 				BSONObj res;
                 scoped_ptr<ScopedDbConnection> fromconn, toconn;
@@ -1912,8 +1913,7 @@ namespace mongo {
                 {
                     try
                     {
-                        toconn.reset(ScopedDbConnection::getScopedDbConnection(
-                         		removedreplicas[assignment[i]] ) );
+                        toconn.reset(ScopedDbConnection::getScopedDbConnection(to) );
                         break;
                     }
 					catch (DBException e)
@@ -1928,7 +1928,7 @@ namespace mongo {
                     try
                     {
 				        fromconn.reset(ScopedDbConnection::getScopedDbConnection(
-                             	removedreplicas[j] ) );
+                             	from ) );
                         break;
                     }
                     catch(DBException e)
@@ -1966,24 +1966,25 @@ namespace mongo {
 					}
 				}
 
-				cout << "[MYCODE] Chunk " << i << " moving data from shard " << j << " to " << assignment[i] << endl;
 				cout << "[MYCODE] Source Count: " << sourceCount << " Dest Count: " << dstCount << endl;
 
-                BSONObjBuilder b;
+                /*BSONObjBuilder b;
                 b.appendAs(min[key], "min");
-                BSONObj minID = b.done();
+                BSONObj minID = b.done();*/
 
 				try
 				{
 					toconn->get()->runCommand( "admin" , 
 						BSON( 	"moveData" << ns <<
 								"key" << key << 
-      							"from" << removedreplicas[j] << 
-      							"to" << removedreplicas[assignment[i]] << 
+      							"from" << from << 
+      							"to" << to << 
       							/////////////////////////////// 
-      							"range" << range << 
+      							"min" << min <<
+                                "max" << max <<
+                                "range" << range <<
       							"maxChunkSizeBytes" << Chunk::MaxChunkSize << 
-      							"shardId" << Chunk::genID(ns, minID) << 
+      							//"shardId" << Chunk::genID(ns, minID) << 
       							"configdb" << configServer.modelServer() << 
       							"secondaryThrottle" << true 
       						) ,
