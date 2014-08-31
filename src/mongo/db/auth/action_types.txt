@@ -53,6 +53,7 @@
 "moveChunk",
 "moveData",
 "testLatency",
+"fetchData",
 "movePrimary",
 "netstat",
 "profileEnable",
