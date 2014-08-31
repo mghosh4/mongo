@@ -1759,7 +1759,7 @@ class TestLatencyCommand : public Command {
                     BSONObj min = i > 0 ? prev : globalMin;
                     BSONObj max = i == numChunks - 1 ? globalMax : *it;
                     BSONObj range = getRangeAsBSON(key, min, max);
-                    cout << "[WWT] Range:" << range.toString() << endl;
+                    //cout << "[WWT] Range:" << range.toString() << endl;
 
                     //If I am the destination node
                     if (assignment[i] == shardID)
@@ -1880,6 +1880,7 @@ class TestLatencyCommand : public Command {
                     
                     unsigned int threadsArray[threadsBuckets.size()];
                     vector<vector<map<BSONObj, vector<BSONObj> > > > candidateList;
+                    vector<map<BSONObj, vector<BSONObj> > > candidate;
                     for(unsigned int i =0;i<threadsBuckets.size();i++)
                     {
                         
@@ -1891,32 +1892,142 @@ class TestLatencyCommand : public Command {
 			if(threadsArray[i]==0){
                             threadsArray[i] = 1;
                         }
-                        log() << "[WWT] check1" << endl;
-                        vector<map<BSONObj, vector<BSONObj> > > candidate;
-                        log() << "[WWT] check2" << endl;
-                        candidate.push_back(threadsBuckets[i]);
-                        log() << "[WWT] check3" << endl;
-                        while(threadsArray[i]!=candidate.size()){
-                            splitFromList(candidate,proposedKey,ns, maxSizeElem);
-                        } 
-                        log() << "[WWT] check4" << endl;
+                        
+                        
+                        //candidate.push_back(threadsBuckets[i]);
+
+                       // while(threadsArray[i]!=candidate.size()){
+                            splitFromList(candidate, threadsBuckets[i], threadsArray[i], proposedKey,ns, maxSizeElem);
+                           // log() << "[WWT] candidate list size=" << candidate.size() << endl;
+                            //splitFromList(candidate, proposedKey,ns, maxSizeElem);
+                        //} 
                         candidateList.push_back(candidate);
                     }
                     threadsBuckets.clear();
-                    for(unsigned int i = 0; i< candidateList.size();i++)
-                    {
-                        vector<map<BSONObj, vector<BSONObj> > > candidate = candidateList[i];
+                    //for(unsigned int i = 0; i< candidateList.size();i++)
+                    //{
+                    //    vector<map<BSONObj, vector<BSONObj> > > candidate = candidateList[i];
                         for(unsigned int j = 0; j< candidate.size();j++)
                         {
                             threadsBuckets.push_back(candidate[j]);
                         }
-                    }
+                   // }
+                   log()<< "[WWT]-------------after matching -------------------" << endl;
+		   print(threadsBuckets);
             }
             else {
                return;
 	    } 
 	}
 
+        void splitFromList(vector< std::map<BSONObj, vector<BSONObj> > >& candidate ,std::map<BSONObj, vector<BSONObj> > & fromList, int numThreads, BSONObj proposedKey, string ns,BSONElement maxSizeElem) {
+             const char *key_char = proposedKey.firstElement().fieldName();
+             if(fromList.size() != 1){
+                  log()<<"[WWT] error in splitFromList";
+                  return;
+             } else {
+                 map<BSONObj, vector<BSONObj> >::iterator iterator= fromList.begin();
+                 vector<BSONObj> ranges = iterator->second;
+		 BSONObj from = iterator->first;
+                 string fromStr = from["from"].str();
+
+                 long long totalCount = from["count"].Long();
+                 if(numThreads )
+
+
+		 for(vector<BSONObj>::iterator it=ranges.begin();it!=ranges.end(); it++)
+                 {
+                     
+                     BSONObj rangeObj = *it ;
+                     BSONObj range = rangeObj["range"].Obj();
+                     long long rangeCount = rangeObj["count"].Long();
+
+                     int numRangeThread = (int)round( (double)rangeCount / (double)totalCount * numThreads);
+                     if(numRangeThread < 1 ){
+                         numRangeThread = 1;
+                     }
+                     log() << "[WWT] range " << rangeObj.toString() << " has " << numRangeThread << " threads" <<endl;
+                     if(numRangeThread > 1){
+                          log() << "[WWT] checkpoint1" <<endl;
+                          BSONObjSet rangeSet;
+                
+                          BSONObj min, max;
+                          log() << "[WWT] checkpoint2" <<endl;
+                          getMinMaxAsBSON(range, proposedKey, min, max);
+
+                          log() << "[WWT Migrate] start split Vector = " << fromStr 
+                                << " key" << proposedKey.toString() 
+                                << " range " << range.toString() 
+                                << " min " << min.toString() 
+                                << " max " << max.toString()<<endl;
+
+                          scoped_ptr<ScopedDbConnection> conn(
+                                      ScopedDbConnection::getInternalScopedDbConnection(fromStr));
+
+             	          BSONObj splitResult;
+             	          BSONObjBuilder cmd;
+             	          cmd.append( "splitVector" , ns );//TO-DO make sure this is the right ns
+             	          cmd.append( "keyPattern" , proposedKey );
+	                  cmd.append( "min" , min );
+        	          cmd.append( "max" , max );
+             	          cmd.append( "range", range);
+             	          cmd.append( "maxChunkSizeBytes" , maxSizeElem.Int() );
+             	          cmd.append( "maxSplitPoints" , numRangeThread);
+             	          //cmd.append( "maxChunkObjects" , maxObjs ); don't need this, in SplitVector deal with this
+             	          cmd.appendBool( "subSplit" , true);
+             	          BSONObj splitCmdObj = cmd.obj();
+        
+             	          if ( ! conn->get()->runCommand( "admin" , splitCmdObj , splitResult )) {
+                            conn->done();
+                            log() << "[WWT Migrate] Pick split Vector cmd failed\n";
+                            return ;
+             	          }
+        
+            	          log() << "[WWT Migrate] Pick split Vector cmd done\n"; 
+                          BSONObjIterator it( splitResult.getObjectField( "splitKeys" ) );
+             	          BSONObj prev;
+             	          for(int j = 0; j < numRangeThread ; j++){
+                            BSONObj current;
+                            if(it.more()){
+                                   current = it.next().Obj().getOwned();
+                            } else {
+                                   current = max;
+                            }
+                            BSONObj local_min = j > 0 ? prev : min;
+		            BSONObj local_max = j == numRangeThread-1 ? max : current;
+                            BSONObj subRange = getRangeAsBSON(key_char, local_min, local_max);
+                            log() << "[WWT Migrate] subRange:" << subRange.toString() << endl;
+                  
+                            BSONObjBuilder b;
+                            b.append("range",subRange);
+                            b.append("count",rangeCount /numRangeThread);
+                            vector<BSONObj> ranges;
+                            ranges.push_back(b.done().getOwned());
+                            map<BSONObj, vector<BSONObj> > map;
+			    map.insert(std::make_pair(from, ranges));
+                            candidate.push_back(map);
+                            
+                            //rangeSet.insert( range.getOwned() );
+             	            prev = current;
+             	          } // end interation of subRange
+                     }//end numRangeThread>1
+                     else { //numRangeThread == 1
+                          vector<BSONObj> ranges;
+                          ranges.push_back(rangeObj.getOwned());
+                          map<BSONObj, vector<BSONObj> > map;
+			  map.insert(std::make_pair(from, ranges));
+                          candidate.push_back(map);
+                         
+                     }
+		
+                 }//end for range
+                 log() << "----------After Split---------" <<endl;
+                 print(candidate);
+             }//end else         
+        }
+
+
+/*
 	void splitFromList(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets, BSONObj proposedKey, string ns,BSONElement maxSizeElem) {
             //find the largest from nodes
             log() << "[WWT Migrate] split begin" << endl;
@@ -1956,7 +2067,7 @@ class TestLatencyCommand : public Command {
             threadsBuckets.push_back(from2);
             
             log() << "[WWT Migrate] after split :" << endl;
-	    
+	    print(threadsBuckets);
         }
  
         bool splitOneFrom(map<BSONObj, vector<BSONObj> >& old, map<BSONObj, vector<BSONObj> >& new1,map<BSONObj, vector<BSONObj> >& new2, BSONObj proposedKey, string ns,BSONElement maxSizeElem)
@@ -2044,7 +2155,7 @@ class TestLatencyCommand : public Command {
              	  prev = current;
              	}
              	
-                log()<<"[WWT_TIME] SplitVector Finish  "<<endl;
+                //log()<<"[WWT_TIME] SplitVector Finish  "<<endl;
             }
             else  {
             //if there is more than one range in the map's range vector, we need to perform Balance Partition algorithm
@@ -2107,6 +2218,7 @@ class TestLatencyCommand : public Command {
                  }
                  return true;
         }
+
         static bool compareRange(const BSONObj& range1, const BSONObj& range2)
         {
             long long count1 = range1["count"].Long();
@@ -2114,7 +2226,7 @@ class TestLatencyCommand : public Command {
            
             return count1>count2;
         }
-
+*/
         void mergeFromList(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets) {
             //find the two smallest from nodes
             log() << "[WWT Migrate] merge begin" << endl;
@@ -2279,7 +2391,8 @@ class TestLatencyCommand : public Command {
 
             void singleMigrate( std::map < BSONObj, vector<BSONObj> >& fromList, string ns,string key, int i)
            {
-		//
+		Timer t;
+                long long totalCount = 0;
                 //threadName+=range.getOwned().toString().c_str();
                 //char *intStr = std::itoa(i);
                 //string threadName(intStr);
@@ -2298,6 +2411,7 @@ class TestLatencyCommand : public Command {
                       int from_count = 0;
                       for(vector<BSONObj>::iterator rangeIt = ranges.begin(); rangeIt!=ranges.end(); rangeIt++)
 		      {  
+                           log() << "[WWT_SingleMigrate] " << (*rangeIt).toString() << endl;
                            BSONObj o;
 			   BSONObj qRange = (*rangeIt)["range"].Obj().getOwned();
 
@@ -2305,15 +2419,62 @@ class TestLatencyCommand : public Command {
                            //fetch remote data
 			   while(1)
 			   {
-				log() << "Query Range:" << qRange.toString() << endl;
-				   
+				log() << "Query Range:" << qRange.toString() << "from" << fromStr << endl;
+
 				try
                 		{
 					scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk)); 
                                 	try
 					{
-					
+
 						while (cursor->more()) {
+							range_count++;
+							o = cursor->next().getOwned();
+							//log() << "[MYCODE] DATA: " << o.toString() << rsLog;
+        						{
+                                        
+            						PageFaultRetryableSection pgrs;
+	        	    				while ( 1 ) {
+    	    	        					try {
+									Lock::DBWrite r(ns);
+									Client::Context context(ns);
+									theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
+            	        						break;
+            	    						}
+            	    						catch ( PageFaultException& e ) {
+            	        						e.touch();
+            	    						}
+            						}
+        					}
+					}
+						break;
+					}
+					catch (DBException e)
+					{
+                                                log() << "Exception" << e.what() <<endl;
+						log() << "Last BSONObj before crash:" << o.toString() << endl;
+
+						BSONObjBuilder b;
+						BSONObjBuilder sub(b.subobjStart(key));
+						sub.appendAs(o[key], "$gt");
+						BSONObj rangeVal = qRange[key].Obj();
+						if (!rangeVal["$lt"].eoo())
+							sub.append(rangeVal["$lt"]);
+						BSONObj subObj = sub.done();
+						qRange = b.done().getOwned();
+					}
+				}
+                		catch (DBException e)
+                		{
+                	    		log() << "[MYCODE] DBClientCursor call failed" << endl;
+               		 	}
+
+			 }//end while(1)
+                         from_count+=range_count;
+                         log() << "[WWT] Fetch data in range " <<qRange.toString() << " count " << range_count  << endl; 
+                         //remove remote data
+                         while (true)
+			 {
 				try
 				{
 					fromConn->get()->remove(ns, qRange);
@@ -2337,8 +2498,9 @@ class TestLatencyCommand : public Command {
               		log() << "[MYCODE] Caught exception while killing connection" << endl;
             	      }
                       log() << "[WWT] Fetched data Result: " << fromStr << " count " << from_count << endl;
+                      totalCount +=from_count;
                 }//end for fromIt
-                
+                log() << "[WWT_TIME] time for this threads" << "in " <<t.millis() << " count = " << totalCount <<endl;
                 cc().shutdown();
             }
             

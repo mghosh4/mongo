@@ -78,18 +78,18 @@ sh.shardCollection = function( fullName , key , unique ) {
     return sh._adminCommand( cmd );
 }
 
-sh.reShardCollection = function( fullName , key , unique , loadBalance , multithread ) {
+sh.reShardCollection = function( fullName , key , unique , loadBalance , numThreads ) {
     sh._checkFullName( fullName )
     assert( key , "need a key" )
     assert( typeof( key ) == "object" , "key needs to be an object" )
     
-    var cmd = { reShardCollection : fullName , key : key }
+    var cmd = { reShardCollection : fullName , key : key , multithread: numThreads }
     if ( unique ) 
         cmd.unique = true;
     if ( loadBalance ) 
         cmd.loadBalance = true;
-    if ( multithread ) 
-        cmd.multithread = true;
+    //if ( multithread ) 
+    //    cmd.multithread = true;
 
     return sh._adminCommand( cmd );
 }
