@@ -982,38 +982,25 @@ namespace mongo {
                 Shard primary = grid.getDBConfig(ns)->getPrimary();
                 primary.getAllShards( shards );
                 int numShards = shards.size();
-                long long rowCount = 0, maxShard = 0, maxCount = 0, totalSize = 0;
-                BSONObj stats;
+                long long rowCount = 0;
 				for (int i = 0; i < numShards; i++)
                 {
 					log() << "[MYCODE] Shard Info: " << shards[i].toString() << endl;
                     scoped_ptr<ScopedDbConnection> shardconn(
                     	ScopedDbConnection::getScopedDbConnection(
                            	shards[i].getConnString() ) );
-
-                    if (!shardconn->get()->runCommand(nsStr.db.c_str(), BSON("collStats" << nsStr.coll.c_str()), stats)) {
-                        errmsg = "failed on shard: " + i + stats.toString();
-                        return false;
-                    }
                     
-                    rowCount += stats["count"].numberLong();
-                    if (maxCount < stats["count"].numberLong())
-                    {
-                        maxShard = i;
-                        maxCount = stats["count"].numberLong();
-                    }
-                    totalSize += stats["size"].numberLong();
+                    rowCount += shardconn->get()->count(ns);
                     shardconn->done();
                 }
 
-                long long avgObjSize = totalSize / rowCount;
-                long long maxObjectPerChunk = Chunk::MaxChunkSize / avgObjSize;
+                log() << "[MYCODE_TIME] rowCount: " << rowCount << endl;
+
+                long long maxObjectPerChunk = rowCount / numChunk;
                 //if (maxObjectPerChunk > Chunk::MaxObjectPerChunk)
                 //    maxObjectPerChunk = Chunk::MaxObjectPerChunk;
 
-                log() << "[MYCODE_TIME] rowCount: " << rowCount << " totalSize: " << totalSize << " maxCount: " << maxCount << " maxShard: " << maxShard << " maxObjectPerChunk:" << maxObjectPerChunk << endl;
-
-                pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize, numChunk - 1, maxObjectPerChunk, shards[maxShard].getConnString());
+                pickSplitVector(splitPoints, ns, proposedKey, proposedShardKey.globalMin(), proposedShardKey.globalMax(), Chunk::MaxChunkSize, numChunk - 1, maxObjectPerChunk);
 
 				numChunk = splitPoints.size() + 1;
                 for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
@@ -1077,65 +1064,6 @@ namespace mongo {
 				for (int i = 0; i < numShards; i++)
 					primaryReplicas[i] = replicaSets[numHosts - 1][i];
 
-                // Range Adjustment
-			    long long **rangecount;
-                rangecount = new long long*[numChunk];
-				for (int i = 0; i < numChunk; i++)
-                    rangecount[i] = new long long[numShards];
-
-				for (int i = 0; i < numChunk; i++)
-					for (int j = 0; j < numShards; j++)
-						rangecount[i][j] = 0;
-
-                collectData(splitPoints, ns, removedReplicas, numChunk, numShards, proposedKey, rangecount);
-
-                BSONObjSet finalPoints;
-                BSONObj globalMin = ShardKeyPattern(proposedKey).globalMin();
-                BSONObj globalMax = ShardKeyPattern(proposedKey).globalMax();
-                BSONObjSet::iterator it = splitPoints.begin();
-                BSONObj prev;
-                long long chunkCount = 0, numSplits = 0;
-                for(int i = 0; i < numChunk; i++) {
-                    BSONObj min = i > 0 ? prev : globalMin;
-                    BSONObj max = i == numChunk - 1 ? globalMax : *it;
-
-                    chunkCount = 0;
-                    maxShard = 0;
-                    maxCount  = 0;
-					for (int j = 0; j < numShards; j++)
-                    {
-                        if (maxCount < rangecount[i][j])
-                        {
-                            maxCount = rangecount[i][j];
-                            maxShard = j;
-                        }
-						chunkCount += rangecount[i][j];
-                    }
-
-                    numSplits = (long long)std::ceil((double)chunkCount / maxObjectPerChunk);
-                    //log() << "[MYCODE] Range:" << getRangeAsBSON(proposedKey.toString().c_str(), min, max).toString().c_str() << " chunkCount: " << chunkCount << " numSplits: " << numSplits << endl;
-                    log() << "[MYCODE] min:" << min.toString().c_str() << " max:" << max.toString().c_str() << " chunkCount: " << chunkCount << " numSplits: " << numSplits << endl;
-
-                    if (numSplits > 1)
-                        pickSplitVector(finalPoints, ns, proposedKey, min, max, Chunk::MaxChunkSize, numSplits, maxObjectPerChunk, shards[maxShard].getConnString());
-
-                    log() << "[MYCODE] Split Points after split\n";
-                    for (BSONObjSet::iterator it1 = finalPoints.begin(); it1 != finalPoints.end(); it1++)
-                        log() << "[MYCODE] Split Points:" << it1->toString() << endl;
-                        
-					if (i < numChunk - 1)
-					{
-                        finalPoints.insert(*it);
-                    	prev = *it;
-                    	it++;
-					}
-                }
-
-                splitPoints = finalPoints;
-				numChunk = splitPoints.size() + 1;
-                for (BSONObjSet::iterator it = splitPoints.begin(); it != splitPoints.end(); it++)
-                    log() << "[MYCODE] Split Points:" << it->toString() << endl;
-
                 // 4. Stopping the first set of replicas
 				OpTime currTS[numShards];
 
@@ -1151,7 +1079,7 @@ namespace mongo {
 				log() << "[MYCODE_TIME] Running the algorithm" << endl;
                 bool loadBalance = cmdObj["loadBalance"].trueValue();
 				int assignment[numChunk];
-			    long long **datainkr;
+				long long **datainkr;
                 datainkr = new long long*[numChunk];
 				for (int i = 0; i < numChunk; i++)
                     datainkr[i] = new long long[numShards];
@@ -1284,35 +1212,43 @@ namespace mongo {
                 conn1->done();
             }
 
-            void pickSplitVector( BSONObjSet& splitPoints, const string ns, BSONObj shardKey, BSONObj min, BSONObj max, int chunkSize /* bytes */, int maxPoints, int maxObjs, string connString ) const {
+            void pickSplitVector( BSONObjSet& splitPoints, const string ns, BSONObj shardKey, BSONObj min, BSONObj max, int chunkSize /* bytes */, int maxPoints, int maxObjs ) const {
                 // Ask the mongod holding this chunk to figure out the split points.
-                log() << "[MYCODE] Pick split Vector\n";
-                scoped_ptr<ScopedDbConnection> conn(
-                        ScopedDbConnection::getInternalScopedDbConnection( connString ) );
-                BSONObj result;
-                BSONObjBuilder cmd;
-                cmd.append( "splitVector" , ns );
-                cmd.append( "keyPattern" , shardKey );
-                cmd.append( "min" , min );
-                cmd.append( "max" , max );
-                cmd.append( "maxChunkSizeBytes" , chunkSize );
-                //cmd.append( "maxSplitPoints" , maxPoints );
-                cmd.append( "maxChunkObjects" , maxObjs );
-                cmd.appendBool( "reShard" , true);
-                BSONObj cmdObj = cmd.obj();
+                vector<Shard> newShards;
+                Shard newprimary = grid.getDBConfig(ns)->getPrimary();
+                newprimary.getAllShards( newShards );
+                int numShards = 1;
+
+                for (int i = 0; i < numShards; i++)
+                {
+                    log() << "[MYCODE] Pick split Vector\n";
+                    scoped_ptr<ScopedDbConnection> conn(
+                            ScopedDbConnection::getInternalScopedDbConnection( newShards[i].getConnString() ) );
+                    BSONObj result;
+                    BSONObjBuilder cmd;
+                    cmd.append( "splitVector" , ns );
+                    cmd.append( "keyPattern" , shardKey );
+                    cmd.append( "min" , min );
+                    cmd.append( "max" , max );
+                    cmd.append( "maxChunkSizeBytes" , chunkSize );
+                    //cmd.append( "maxSplitPoints" , maxPoints );
+                    cmd.append( "maxChunkObjects" , maxObjs );
+                    cmd.appendBool( "reShard" , true);
+                    BSONObj cmdObj = cmd.obj();
         
-                if ( ! conn->get()->runCommand( "admin" , cmdObj , result )) {
+                    if ( ! conn->get()->runCommand( "admin" , cmdObj , result )) {
+                        conn->done();
+                        log() << "[MYCODE] Pick split Vector cmd failed\n";
+                        return;
+                    }
+        
+                    log() << "[MYCODE] Pick split Vector cmd done\n";
+                    BSONObjIterator it( result.getObjectField( "splitKeys" ) );
+                    while ( it.more() ) {
+                        splitPoints.insert( it.next().Obj().getOwned() );
+                    }
                     conn->done();
-                    log() << "[MYCODE] Pick split Vector cmd failed\n";
-                    return;
                 }
-        
-                log() << "[MYCODE] Pick split Vector cmd done\n";
-                BSONObjIterator it( result.getObjectField( "splitKeys" ) );
-                while ( it.more() ) {
-                    splitPoints.insert( it.next().Obj().getOwned() );
-                }
-                conn->done();
             }
 
 			bool reconfigureHosts(string ns, vector<Shard> shards, string removedReplicas[], string primary[], OpTime currTS[], BSONObj proposedKey, map<string, int> hostIDMap, bool configUpdate, string &errmsg, BSONObjSet splitPoints, int assignment[], Timer t)
