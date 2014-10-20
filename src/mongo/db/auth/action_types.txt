@@ -52,7 +52,6 @@
 "mapReduceShardedFinish",
 "moveChunk",
 "moveData",
-"fetchData",
 "movePrimary",
 "netstat",
 "profileEnable",

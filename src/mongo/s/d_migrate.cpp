@@ -1520,11 +1520,10 @@ namespace mongo {
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // 1.
             const string ns = cmdObj.firstElement().str();
-		    BSONObj key = cmdObj["key"].Obj();
+			const string key = cmdObj["key"].str();
             string to = cmdObj["to"].str();
             string from = cmdObj["from"].str(); // my public address, a tad redundant, but safe
 			log() << "[MYCODE] INSIDE THE CODE" << rsLog;
-            Timer t;
 
             /*while(!theReplSet->state().shunned())
             {
@@ -1554,9 +1553,8 @@ namespace mongo {
                 }
             }
 
-            BSONObj min  = cmdObj["min"].Obj();
-            BSONObj max  = cmdObj["max"].Obj();
-            BSONObj range = cmdObj["range"].Obj();
+            BSONObj range  = cmdObj["range"].Obj();
+            BSONElement shardId = cmdObj["shardId"];
             BSONElement maxSizeElem = cmdObj["maxChunkSizeBytes"];
 
             if ( ns.empty() ) {
@@ -1570,6 +1568,16 @@ namespace mongo {
             }
             if ( from.empty() ) {
                 errmsg = "need to specify shard to move chunk from";
+                return false;
+            }
+
+            if ( range.isEmpty() ) {
+                errmsg = "need to specify a range";
+                return false;
+            }
+
+            if ( shardId.eoo() ) {
+                errmsg = "need shardId";
                 return false;
             }
 
@@ -1589,7 +1597,7 @@ namespace mongo {
                 configServer.init( configdb );
             }
 
-            // MoveTimingHelper timing( "from" , ns , min , max , 6 /* steps */ , errmsg );
+            //MoveTimingHelper timing( "from" , ns , min , max , 6 /* steps */ , errmsg );
 
             // Make sure we're as up-to-date as possible with shard information
             // This catches the case where we had to previously changed a shard's host by
@@ -1620,7 +1628,7 @@ namespace mongo {
                 }
             }
 
-			/*scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
+			scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk));
 
 			BSONObj o;
 			int count = 0;
@@ -1656,63 +1664,7 @@ namespace mongo {
 				}
 			}
 
-			log() << "[MYCODE] count: " << count << endl;*/
-
-			log() << "[MYCODE_TRANSFER] BEFORE FETCH" << t.millis() << endl;
-			log() << "[MYCODE_TRANSFER] max:" << max.toString() << " min:" << min.toString() << endl;
-            BSONObj res;
-            while(true)
-            {
-                try
-                {
-                    fromConn->get()->runCommand( "admin" ,
-                        BSON(   "fetchData" << ns <<
-                                "key" << key <<
-                                "min" << min << 
-                                "max" << max
-                            ),
-                            res
-                    );
-                    break;
-                }
-                catch(DBException e)
-                {
-                    log() << "[MYCODE] Data fetch failed from server\n" << e.what() << endl;
-                }
-                catch(std::exception e)
-                {
-                    log() << "[MYCODE] Data fetch failed from server\n" << endl;
-                }
-            }
-			log() << "[MYCODE_TRANSFER] AFTER FETCH" << t.millis() << endl;
-
-			//log() << "[MYCODE] Fetch Returned" << endl;
-            BSONObj arr = res["objects"].Obj(); 
-
-            BSONObjIterator i( arr ); 
-			int count = 0;
-            while( i.more() ) { 
-                BSONObj o = i.next().Obj(); 
-				log() << "[MYCODE] DATA: " << o.toString() << rsLog;
-                count++;
-                { 
-                    PageFaultRetryableSection pgrs; 
-                    while ( 1 ) { 
-                        try { 
-							Lock::DBWrite r(ns);
-							Client::Context context(ns);
-							theDataFileMgr.insert(ns.c_str(), o.objdata(), o.objsize());
-            	        	break;
-                        } 
-                        catch ( PageFaultException& e ) { 
-                            e.touch(); 
-                        } 
-                    } 
-                }
-            } 
-
 			log() << "[MYCODE] count: " << count << endl;
-			log() << "[MYCODE_TRANSFER] AFTER COMMIT" << t.millis() << endl;
 
 			//Delete all the data from the source shard
 
@@ -1739,177 +1691,11 @@ namespace mongo {
             {
                 log() << "[MYCODE] Caught exception while killing connection" << endl;
             }
-			log() << "[MYCODE_TRANSFER] AFTER REMOVE" << t.millis() << endl;
 
 			return true;
 		}
 
 	}moveDataCmd;
-
-    class FetchDataCommand : public Command {
-    public:
-        FetchDataCommand() : Command( "fetchData" ) {}
-        virtual void help( stringstream& help ) const {
-            help << "should not be calling this directly";
-        }
-
-        virtual bool slaveOk() const { return true; }
-        virtual bool adminOnly() const { return true; }
-        virtual LockType locktype() const { return NONE; }
-        virtual void addRequiredPrivileges(const std::string& dbname,
-                                           const BSONObj& cmdObj,
-                                           std::vector<Privilege>* out) {
-            ActionSet actions;
-            actions.addAction(ActionType::fetchData);
-            out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
-        }
-
-        bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
-            // 1.
-            Timer t;
-			log() << "[MYCODE] INSIDE FETCH CODE" << endl;
-            const string ns = cmdObj.firstElement().str();
-            BSONObj _min = cmdObj["min"].Obj();
-            BSONObj _max = cmdObj["max"].Obj();
-
-            //SpinLock _trackerLocks;
-            Client::ReadContext ctx( ns ); 
-            NamespaceDetails *d = nsdetails( ns.c_str() ); 
-            if ( ! d ) { 
-                errmsg = "ns not found, should be impossible"; 
-			    log() << "[MYCODE] " << errmsg << endl;
-                return false; 
-            } 
-
-            const IndexDetails *idx = d->findIndexByPrefix( cmdObj["key"].Obj() , 
-                                                            true );  /* require single key */ 
-
-            if ( idx == NULL ) { 
-                errmsg = (string)"can't find index in storeCurrentLocs" + causedBy( errmsg ); 
-			    log() << "[MYCODE] " << errmsg << endl;
-                return false;
-            }
-            // Assume both min and max non-empty, append MinKey's to make them fit chosen index 
-            KeyPattern kp( idx->keyPattern() );
-            BSONObj min = Helpers::toKeyFormat( kp.extendRangeBound( _min, false ) );
-            BSONObj max = Helpers::toKeyFormat( kp.extendRangeBound( _max, false ) );
-			log() << "[MYCODE_TRANSFER] max:" << max.toString() << " min:" << min.toString() << endl;
-
-            BtreeCursor* btreeCursor = BtreeCursor::make( d , *idx , min , max , false , 1 ); 
-            auto_ptr<ClientCursor> cc( 
-                    new ClientCursor( QueryOption_NoCursorTimeout , 
-                            shared_ptr<Cursor>( btreeCursor ) ,  ns ) ); 
-
-            // use the average object size to estimate how many objects a full chunk would carry 
-            // do that while traversing the chunk's range using the sharding index, below 
-            // there's a fair amount of slack before we determine a chunk is too large because object sizes will vary 
-            unsigned long long maxRecsWhenFull; 
-            long long avgRecSize; 
-            const long long totalRecs = d->stats.nrecords; 
-            if ( totalRecs > 0 ) { 
-                avgRecSize = d->stats.datasize / totalRecs; 
-                maxRecsWhenFull = Chunk::MaxChunkSize / avgRecSize; 
-                maxRecsWhenFull = std::min( (unsigned long long)(Chunk::MaxObjectPerChunk + 1) , 130 * maxRecsWhenFull / 100 /* slack */ ); 
-            } 
-            else { 
-                avgRecSize = 0; 
-                maxRecsWhenFull = Chunk::MaxObjectPerChunk + 1; 
-            } 
-			log() << "[MYCODE] avgRecSize:" << avgRecSize << " maxRecsWhenFull:" << maxRecsWhenFull << endl;
-			log() << "[MYCODE_TRANSFER] COLLECT START" << t.millis() << endl;
-             
-            // do a full traversal of the chunk and don't stop even if we think it is a large chunk 
-            // we want the number of records to better report, in that case 
-            set<DiskLoc> _cloneLocs;
-            //bool isLargeChunk = false; 
-            //unsigned long long recCount = 0;; 
-            while ( cc->ok() ) { 
-                DiskLoc dl = cc->currLoc(); 
-                /*if ( ! isLargeChunk ) 
-                { 
-                    scoped_spinlock lk( _trackerLocks ); */
-                    _cloneLocs.insert( dl ); 
-                //} 
-                cc->advance(); 
-
-                // we can afford to yield here because any change to the base data that we might miss is already being 
-                // queued and will be migrated in the 'transferMods' stage 
-                if ( ! cc->yieldSometimes( ClientCursor::DontNeed ) ) { 
-                    cc.release(); 
-                    break; 
-                } 
-
-                /*if ( ++recCount > maxRecsWhenFull ) { 
-                    isLargeChunk = true; 
-                }*/ 
-            }
-			log() << "[MYCODE] Number of cloned locs:" << _cloneLocs.size() << endl;
-			log() << "[MYCODE_TRANSFER] COLLECT END" << t.millis() << endl;
-
-            int allocSize; 
-            { 
-                Client::ReadContext ctx( ns ); 
-                NamespaceDetails *d = nsdetails( ns.c_str() ); 
-                verify( d ); 
-                //scoped_spinlock lk( _trackerLocks ); 
-                allocSize = std::min(BSONObjMaxUserSize, (int)((12 + d->averageObjectSize()) * _cloneLocs.size())); 
-            } 
-            BSONArrayBuilder a (allocSize); 
-             
-            while ( 1 ) { 
-                bool filledBuffer = false; 
-                 
-                auto_ptr<LockMongoFilesShared> fileLock; 
-                Record* recordToTouch = 0; 
-
-                { 
-                    Client::ReadContext ctx( ns ); 
-                    //scoped_spinlock lk( _trackerLocks ); 
-                    set<DiskLoc>::iterator i = _cloneLocs.begin(); 
-                    for ( ; i!=_cloneLocs.end(); ++i ) { 
-                        DiskLoc dl = *i; 
-                         
-                        Record* r = dl.rec(); 
-                        if ( ! r->likelyInPhysicalMemory() ) { 
-                            fileLock.reset( new LockMongoFilesShared() ); 
-                            recordToTouch = r; 
-                            break; 
-                        } 
-                         
-                        BSONObj o = dl.obj(); 
-				        //log() << "[MYCODE] DATA: " << o.toString() << rsLog;
-                         
-                        // use the builder size instead of accumulating 'o's size so that we take into consideration 
-                        // the overhead of BSONArray indices 
-                        if ( a.len() + o.objsize() + 1024 > BSONObjMaxUserSize ) { 
-                            filledBuffer = true; // break out of outer while loop 
-                            break; 
-                        } 
-                         
-                        a.append( o ); 
-                    } 
-                     
-                    _cloneLocs.erase( _cloneLocs.begin() , i ); 
-                     
-                    if ( _cloneLocs.empty() || filledBuffer ) 
-                        break; 
-                } 
-                 
-                if ( recordToTouch ) { 
-                    // its safe to touch here because we have a LockMongoFilesShared 
-                    // we can't do where we get the lock because we would have to unlock the main readlock and tne _trackerLocks 
-                    // simpler to handle this out there 
-                    recordToTouch->touch(); 
-                    recordToTouch = 0; 
-                } 
-                 
-            } 
-			log() << "[MYCODE_TRANSFER] DATA COPY END" << t.millis() << endl;
-
-            result.appendArray( "objects" , a.arr() ); 
-            return true; 
-        }              
-    }fetchDataCmd;
 
     bool ShardingState::inCriticalMigrateSection() {
         return migrateFromStatus.getInCriticalSection();

@@ -187,7 +187,6 @@ namespace {
         clusterAdminRoleWriteActions.addAction(ActionType::killop);
         clusterAdminRoleWriteActions.addAction(ActionType::moveChunk);
         clusterAdminRoleWriteActions.addAction(ActionType::moveData);
-        clusterAdminRoleWriteActions.addAction(ActionType::fetchData);
         clusterAdminRoleWriteActions.addAction(ActionType::movePrimary);
         clusterAdminRoleWriteActions.addAction(ActionType::removeShard);
         clusterAdminRoleWriteActions.addAction(ActionType::repairDatabase);
