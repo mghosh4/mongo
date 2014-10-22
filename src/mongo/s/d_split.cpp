@@ -330,6 +330,7 @@ namespace mongo {
                 // provided.
                 const long long avgRecSize = dataSize / recCount;
                 long long keyCount = maxChunkSize / (2 * avgRecSize);
+                cout << "[MYCODE] Max Object Per Chunk:" << maxChunkObjects << "\tkey count:" << keyCount << endl;
                 if ( maxChunkObjects && ( maxChunkObjects < keyCount ) ) {
                     log() << "limiting split vector to " << maxChunkObjects << " (from " << keyCount << ") objects " << endl;
                     keyCount = maxChunkObjects;
