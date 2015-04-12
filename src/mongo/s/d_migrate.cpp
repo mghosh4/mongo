@@ -1555,9 +1555,10 @@ class TestLatencyCommand : public Command {
             out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
         }
 
-	 bool checkAndExtractArgs(BSONObj migrateParams, string& errmsg,
-                                    string& ns, int& shardID, int& numChunks,int& numShards, BSONObj& proposedKey, BSONObj& globalMin, BSONObj& globalMax,
-                                    vector<BSONObj>& splitPoints, vector<int>& assignments, vector<string>& removedReplicas) {
+	 bool checkAndExtractArgs(BSONObj migrateParams, string& errmsg, string& ns, int& shardID, 
+                                  int& numChunks,int& numShards, BSONObj& proposedKey, BSONObj& globalMin, 
+                                  BSONObj& globalMax, vector<BSONObj>& splitPoints, vector<int>& assignments, 
+                                  vector<string>& removedReplicas) {
             //printLogID();
             log()<<"====Arg extraction====="<<endl;
             //namespace
@@ -1651,8 +1652,9 @@ class TestLatencyCommand : public Command {
             cout<<"removedReplicas done"<<endl;
             return true;
         }
+
 	BSONObj getRangeAsBSON(const char* key, BSONObj min, BSONObj max)
-            {
+        {
                 BSONElement minElem = min[key];
                 BSONElement maxElem = max[key];
 
@@ -1671,9 +1673,9 @@ class TestLatencyCommand : public Command {
                 BSONObj subObj = sub.done();
                 BSONObj range = b.done().getOwned();
                 return range;
-            }
-            BSONObj getFetchedDataAsBSON(BSONObj range, long long count) 
-            {
+        }
+        BSONObj getFetchedDataAsBSON(BSONObj range, long long count) 
+        {
 
                  BSONObjBuilder b;
                  b.append("count",count);
@@ -1681,11 +1683,10 @@ class TestLatencyCommand : public Command {
 
                  BSONObj fetchedData = b.done().getOwned();
                  return fetchedData;     
-            }
+        }
 
-            void getMinMaxAsBSON(BSONObj range, BSONObj proposedKey, BSONObj& min, BSONObj& max)
-             
-            {
+        void getMinMaxAsBSON(BSONObj range, BSONObj proposedKey, BSONObj& min, BSONObj& max)
+        {
                 const char *key = proposedKey.firstElement().fieldName();
                 BSONObj sub = range[key].Obj();
                 BSONElement maxElem = sub["$lt"];
@@ -1721,7 +1722,7 @@ class TestLatencyCommand : public Command {
                       max =b2.obj();
                 }
                 
-            }
+        }
  
         void print(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets)
         {
@@ -1838,29 +1839,10 @@ class TestLatencyCommand : public Command {
 	}
 
 
-	void matchThreadandFromNodes(unsigned int& numThreads, vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets, BSONObj proposedKey, string ns,BSONElement maxSizeElem) 
+	void matchThreadandFromNodes(unsigned int& numThreads, vector< std::map<BSONObj, 
+                                     vector<BSONObj> > >& threadsBuckets, BSONObj proposedKey, 
+                                     string ns, BSONElement maxSizeElem) 
         {
-            /*
-            //strategy 1
-            // start matching to guarantee each thread has a map to fetch
-            while(threadsBuckets.size() != numThreads ) 
-            { 
-                if(threadsBuckets.size() > numThreads) 
-                {
-                    //merge the vector
-                    mergeFromList(threadsBuckets);
-                }
-                else if (threadsBuckets.size() < numThreads)
-                {
-                    //split the vector
-                    splitFromList(threadsBuckets,proposedKey,ns);
-                }
-                else {
-                   break;
-		} 
-            }
-            */
-            //strategy 2
             if(threadsBuckets.size() > numThreads) 
             {
                     while(threadsBuckets.size() != numThreads ) 
@@ -1902,7 +1884,7 @@ class TestLatencyCommand : public Command {
                             //splitFromList(candidate, proposedKey,ns, maxSizeElem);
                         //} 
                         candidateList.push_back(candidate);
-                    }
+                    }//end for
                     threadsBuckets.clear();
                     //for(unsigned int i = 0; i< candidateList.size();i++)
                     //{
@@ -1920,7 +1902,10 @@ class TestLatencyCommand : public Command {
 	    } 
 	}
 
-        void splitFromList(vector< std::map<BSONObj, vector<BSONObj> > >& candidate ,std::map<BSONObj, vector<BSONObj> > & fromList, int numThreads, BSONObj proposedKey, string ns,BSONElement maxSizeElem) {
+        void splitFromList(vector< std::map<BSONObj, vector<BSONObj> > >& candidate, 
+                           std::map<BSONObj, vector<BSONObj> > & fromList, int numThreads,
+                           BSONObj proposedKey, string ns,BSONElement maxSizeElem) 
+        {
              const char *key_char = proposedKey.firstElement().fieldName();
              if(fromList.size() != 1){
                   log()<<"[WWT] error in splitFromList";
@@ -1932,7 +1917,7 @@ class TestLatencyCommand : public Command {
                  string fromStr = from["from"].str();
 
                  long long totalCount = from["count"].Long();
-                 if(numThreads )
+                 if(numThreads>0)
 
 
 		 for(vector<BSONObj>::iterator it=ranges.begin();it!=ranges.end(); it++)
@@ -2009,7 +1994,7 @@ class TestLatencyCommand : public Command {
                             
                             //rangeSet.insert( range.getOwned() );
              	            prev = current;
-             	          } // end interation of subRange
+             	           } // end interation of subRange
                      }//end numRangeThread>1
                      else { //numRangeThread == 1
                           vector<BSONObj> ranges;
@@ -2026,208 +2011,8 @@ class TestLatencyCommand : public Command {
              }//end else         
         }
 
-
-/*
-	void splitFromList(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets, BSONObj proposedKey, string ns,BSONElement maxSizeElem) {
-            //find the largest from nodes
-            log() << "[WWT Migrate] split begin" << endl;
-            typedef std::map<BSONObj, vector<BSONObj> >::iterator it_type;
-
-            unsigned int l = 0;
-            long long largestCount = 0;
-
-            for(unsigned int i= 0; i < threadsBuckets.size() ; i++)
-            {
-                std::map<BSONObj, vector<BSONObj> > fromList = threadsBuckets[i];
-                long long count = 0;
-                for(it_type it = fromList.begin() ; it!= fromList.end(); it++) 
-                {
-                      count += (it->first)["count"].Long();
-                }
-                if(count > largestCount) 
-                {
-                    largestCount = count;
-                    l = i;
-                }
-            }
-
-            log() << "[WWT Migrate] largestCount = " << largestCount << " in " << l <<endl;
-            //split this largest one and get two new ones
-            std::map<BSONObj, vector<BSONObj> > from1;
-            std::map<BSONObj, vector<BSONObj> > from2;
-
-            if(!splitOneFrom(threadsBuckets[l], from1, from2, proposedKey,ns, maxSizeElem)){
-                  log()<<"[WWT Migrate] something wrong with splitOneFrom" << endl;
-                  return;
-            }
-
-            //delete largest, insert two new ones
-            threadsBuckets.erase(threadsBuckets.begin()+l);
-            threadsBuckets.push_back(from1);
-            threadsBuckets.push_back(from2);
-            
-            log() << "[WWT Migrate] after split :" << endl;
-	    print(threadsBuckets);
-        }
- 
-        bool splitOneFrom(map<BSONObj, vector<BSONObj> >& old, map<BSONObj, vector<BSONObj> >& new1,map<BSONObj, vector<BSONObj> >& new2, BSONObj proposedKey, string ns,BSONElement maxSizeElem)
+        void mergeFromList(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets) 
         {
-            //we only split the first one of the map because there is only one element in the map in split case
-            // the initial threadsBucket are grouped by from nodes, so there won't be two from nodes in the same map
-           const char *key_char = proposedKey.firstElement().fieldName();
-           string fromStr = (old.begin()->first)["from"].str();
-            //if there is only one range in the map's range vector, we need to send a SplitVector command
-            if(old.begin()->second.size() == 1 ) {
-                //send SplitVector Command
-                BSONObjSet rangeSet;
-                
-                long long count = (old.begin()->first)["count"].Long();
-
-                BSONObj range = (old.begin()->second)[0]["range"].Obj();
-                BSONObj min, max;
-                getMinMaxAsBSON(range, proposedKey, min, max);
-
-                log() << "[WWT Migrate] start split Vector = " << fromStr 
-                      << " key" << proposedKey.toString() 
-                      << " range " << range.toString() 
-                      << " min " << min.toString() 
-                      << " max " << max.toString()<<endl;
-
-                scoped_ptr<ScopedDbConnection> conn(
-                            ScopedDbConnection::getInternalScopedDbConnection(fromStr));
-
-             	BSONObj splitResult;
-             	BSONObjBuilder cmd;
-             	cmd.append( "splitVector" , ns );//TO-DO make sure this is the right ns
-             	cmd.append( "keyPattern" , proposedKey );
-	        cmd.append( "min" , min );
-        	cmd.append( "max" , max );
-             	cmd.append( "range", range);
-             	cmd.append( "maxChunkSizeBytes" , maxSizeElem.Int() );
-             	cmd.append( "maxSplitPoints" , 2);
-             	//cmd.append( "maxChunkObjects" , maxObjs ); don't need this, in SplitVector deal with this
-             	cmd.appendBool( "subSplit" , true);
-             	BSONObj splitCmdObj = cmd.obj();
-        
-             	if ( ! conn->get()->runCommand( "admin" , splitCmdObj , splitResult )) {
-                  conn->done();
-                  log() << "[WWT Migrate] Pick split Vector cmd failed\n";
-                  return false;
-             	}
-        
-            	log() << "[WWT Migrate] Pick split Vector cmd done\n";
-                conn->done();
-                BSONObjBuilder b2;
-                b2.append("from",fromStr);
-                b2.append("count",count/2);
-
-                BSONObj fromNode=b2.done().getOwned();
-   
-
-		BSONObjIterator it( splitResult.getObjectField( "splitKeys" ) );
-             	BSONObj prev;
-             	for(int j = 0; j < 2 ; j++){
-                  BSONObj current;
-                  if(it.more()){
-                         current = it.next().Obj().getOwned();
-                  } else {
-                         current = max;
-                  }
-                  BSONObj local_min = j > 0 ? prev : min;
-		  BSONObj local_max = j == 2-1 ? max : current;
-                  BSONObj range = getRangeAsBSON(key_char, local_min, local_max);
-                  log() << "[WWT Migrate] subRange:" << range.toString() << endl;
-                  
-                  BSONObjBuilder b;
-                  b.append("range",range);
-                  b.append("count",count/2);
-                  vector<BSONObj> ranges;
-                  ranges.push_back(b.done().getOwned());
-
-                  if( j == 0 ) {
-                     new1.insert(std::make_pair(fromNode, ranges));
-                  }
-                  else {
-                     new2.insert(std::make_pair(fromNode, ranges));
-                  }
-                  
-                  rangeSet.insert( range.getOwned() );
-             	  prev = current;
-             	}
-             	
-                //log()<<"[WWT_TIME] SplitVector Finish  "<<endl;
-            }
-            else  {
-            //if there is more than one range in the map's range vector, we need to perform Balance Partition algorithm
-            //since N(sum of rows) is much bigger than n(# of ranges), we only use approximation algo(greedy) here
-            //more details in http://en.wikipedia.org/wiki/Partition_problem
-                vector<BSONObj> team = old.begin()->second;
-                vector<BSONObj> team1;
-                vector<BSONObj> team2;
-                //TO-DO sort team
-                std::sort(team.begin(),team.end(), compareRange);
-                
-                long long team1Count=0;
-                long long team2Count=0;
-
-                for(unsigned int i=0;i<team.size(); i++){
-		    if(team1Count<=team2Count){
-                       team1.push_back(team[i]);
-                       team1Count += team[i]["count"].Long(); 
-                    }
-                    else{
-                       team2.push_back(team[i]);
-                       team2Count += team[i]["count"].Long(); 
-                    }                   
-                }
-                BSONObjBuilder b1;
-                b1.append("from",fromStr);
-                b1.append("count",team1Count);
-                BSONObj fromNode1 = b1.done().getOwned();
-                new1.insert(std::make_pair(fromNode1, team1));
-
-                BSONObjBuilder b2;
-                b2.append("from",fromStr);
-                b2.append("count",team2Count);
-                BSONObj fromNode2 = b2.done().getOwned();
-                new2.insert(std::make_pair(fromNode2, team2));
-
-            }
-		typedef std::map<BSONObj, vector<BSONObj> >::iterator it_type;
-		log()<< "[WWT Migrate] new1"<< endl;
-		for(it_type it = new1.begin() ; it!= new1.end(); it++) 
-                 {
-                     log() << "from " << (it->first)["from"].str() << " count " << (it->first)["count"].Long() ;
-                     vector<BSONObj> ranges = it->second;
-                     for (unsigned int j = 0; j< ranges.size() ; j++ ){
-                           log() << "range: " << ranges[j].toString();
-                     }
-                     log() << endl;
-                 }
-
-                
-                log()<< "[WWT Migrate] new2"<< endl;
-		for(it_type it = new2.begin() ; it!= new2.end(); it++) 
-                 {
-                     log() << "from " << (it->first)["from"].str() << " count " << (it->first)["count"].Long() ;
-                     vector<BSONObj> ranges = it->second;
-                     for (unsigned int j = 0; j< ranges.size() ; j++ ){
-                           log() << "range: " << ranges[j].toString();
-                     }
-                     log() << endl;
-                 }
-                 return true;
-        }
-
-        static bool compareRange(const BSONObj& range1, const BSONObj& range2)
-        {
-            long long count1 = range1["count"].Long();
-            long long count2 = range2["count"].Long();
-           
-            return count1>count2;
-        }
-*/
-        void mergeFromList(vector< std::map<BSONObj, vector<BSONObj> > >& threadsBuckets) {
             //find the two smallest from nodes
             log() << "[WWT Migrate] merge begin" << endl;
 	    typedef std::map<BSONObj, vector<BSONObj> >::iterator it_type;
@@ -2288,7 +2073,6 @@ class TestLatencyCommand : public Command {
 
         bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
             // 1.
-            Timer t;
             log()<<"[WWT Migrate] Move Data Starts"<<endl;
 
             BSONObj migrateParams = cmdObj["para"].Obj().getOwned();
@@ -2310,7 +2094,8 @@ class TestLatencyCommand : public Command {
                                         ns, shardID, numChunks,numShards, proposedKey, globalMin, globalMax,
                                         splitPoints, assignments,removedReplicas)) {
                 return false;
-            }   
+            }  
+            string key(proposedKey.firstElement().fieldName());
             bool secondaryThrottle = cmdObj["secondaryThrottle"].trueValue();
             if ( secondaryThrottle ) {
                 if ( theReplSet ) {
@@ -2331,7 +2116,6 @@ class TestLatencyCommand : public Command {
                     warning() << "secondaryThrottle not allowed with master/slave" << endl;
                 }
             }
-
 	   
             BSONElement maxSizeElem = cmdObj["maxChunkSizeBytes"];
 
@@ -2376,7 +2160,7 @@ class TestLatencyCommand : public Command {
 
              vector<shared_ptr<boost::thread> > migrateThreads;
              for(unsigned int i=0;i<threadsBuckets.size();i++){
-                 migrateThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&MoveDataCommand::singleMigrate, this, boost::ref( threadsBuckets[i]) , ns,key, i ))));
+                 migrateThreads.push_back(shared_ptr<boost::thread>(new boost::thread (boost::bind(&MoveDataCommand::singleMigrate, this, boost::ref( threadsBuckets[i]) , ns, key, i ))));
              }
 
 	     for (unsigned i = 0; i < migrateThreads.size(); i++) {
@@ -2420,11 +2204,9 @@ class TestLatencyCommand : public Command {
 			   while(1)
 			   {
 				log() << "Query Range:" << qRange.toString() << "from" << fromStr << endl;
-
-
 				try
                 		{
-/*
+
 					scoped_ptr<DBClientCursor> cursor(fromConn->get()->query(ns, qRange, 0, 0, 0, QueryOption_SlaveOk)); 
                                 	try
 					{
@@ -2475,9 +2257,11 @@ class TestLatencyCommand : public Command {
 			 }//end while(1)
                          from_count+=range_count;
                          log() << "[WWT] Fetch data in range " <<qRange.toString() << " count " << range_count  << endl; 
-*/
-	log() << "[MYCODE_TRANSFER] BEFORE FETCH" << t.millis() << endl;
-			log() << "[MYCODE_TRANSFER] max:" << max.toString() << " min:" << min.toString() << endl;
+                    }//end for
+               }//end for
+/*
+	    log() << "[MYCODE_TRANSFER] BEFORE FETCH" << t.millis() << endl;
+            log() << "[MYCODE_TRANSFER] max:" << max.toString() << " min:" << min.toString() << endl;
             BSONObj res;
             while(true)
             {
@@ -2561,175 +2345,11 @@ class TestLatencyCommand : public Command {
                       log() << "[WWT] Fetched data Result: " << fromStr << " count " << from_count << endl;
                       totalCount +=from_count;
                 }//end for fromIt
+
                 log() << "[WWT_TIME] time for this threads" << "in " <<t.millis() << " count = " << totalCount <<endl;
-                cc().shutdown();
+                cc().shutdown();*/
             }
 	}moveDataCmd;
-
-    class FetchDataCommand : public Command {
-    public:
-        FetchDataCommand() : Command( "fetchData" ) {}
-        virtual void help( stringstream& help ) const {
-            help << "should not be calling this directly";
-        }
-
-        virtual bool slaveOk() const { return true; }
-        virtual bool adminOnly() const { return true; }
-        virtual LockType locktype() const { return NONE; }
-        virtual void addRequiredPrivileges(const std::string& dbname,
-                                           const BSONObj& cmdObj,
-                                           std::vector<Privilege>* out) {
-            ActionSet actions;
-            actions.addAction(ActionType::fetchData);
-            out->push_back(Privilege(AuthorizationManager::CLUSTER_RESOURCE_NAME, actions));
-        }
-
-        bool run(const string& , BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool) {
-            // 1.
-            Timer t;
-			log() << "[MYCODE] INSIDE FETCH CODE" << endl;
-            const string ns = cmdObj.firstElement().str();
-            BSONObj _min = cmdObj["min"].Obj();
-            BSONObj _max = cmdObj["max"].Obj();
-
-            //SpinLock _trackerLocks;
-            Client::ReadContext ctx( ns ); 
-            NamespaceDetails *d = nsdetails( ns.c_str() ); 
-            if ( ! d ) { 
-                errmsg = "ns not found, should be impossible"; 
-			    log() << "[MYCODE] " << errmsg << endl;
-                return false; 
-            } 
-
-            const IndexDetails *idx = d->findIndexByPrefix( cmdObj["key"].Obj() , 
-                                                            true );  /* require single key */ 
-
-            if ( idx == NULL ) { 
-                errmsg = (string)"can't find index in storeCurrentLocs" + causedBy( errmsg ); 
-			    log() << "[MYCODE] " << errmsg << endl;
-                return false;
-            }
-            // Assume both min and max non-empty, append MinKey's to make them fit chosen index 
-            KeyPattern kp( idx->keyPattern() );
-            BSONObj min = Helpers::toKeyFormat( kp.extendRangeBound( _min, false ) );
-            BSONObj max = Helpers::toKeyFormat( kp.extendRangeBound( _max, false ) );
-			log() << "[MYCODE_TRANSFER] max:" << max.toString() << " min:" << min.toString() << endl;
-
-            BtreeCursor* btreeCursor = BtreeCursor::make( d , *idx , min , max , false , 1 ); 
-            auto_ptr<ClientCursor> cc( 
-                    new ClientCursor( QueryOption_NoCursorTimeout , 
-                            shared_ptr<Cursor>( btreeCursor ) ,  ns ) ); 
-
-            // use the average object size to estimate how many objects a full chunk would carry 
-            // do that while traversing the chunk's range using the sharding index, below 
-            // there's a fair amount of slack before we determine a chunk is too large because object sizes will vary 
-            unsigned long long maxRecsWhenFull; 
-            long long avgRecSize; 
-            const long long totalRecs = d->stats.nrecords; 
-            if ( totalRecs > 0 ) { 
-                avgRecSize = d->stats.datasize / totalRecs; 
-                maxRecsWhenFull = Chunk::MaxChunkSize / avgRecSize; 
-                maxRecsWhenFull = std::min( (unsigned long long)(Chunk::MaxObjectPerChunk + 1) , 130 * maxRecsWhenFull / 100 /* slack */ ); 
-            } 
-            else { 
-                avgRecSize = 0; 
-                maxRecsWhenFull = Chunk::MaxObjectPerChunk + 1; 
-            } 
-			log() << "[MYCODE] avgRecSize:" << avgRecSize << " maxRecsWhenFull:" << maxRecsWhenFull << endl;
-			log() << "[MYCODE_TRANSFER] COLLECT START" << t.millis() << endl;
-             
-            // do a full traversal of the chunk and don't stop even if we think it is a large chunk 
-            // we want the number of records to better report, in that case 
-            set<DiskLoc> _cloneLocs;
-            //bool isLargeChunk = false; 
-            //unsigned long long recCount = 0;; 
-            while ( cc->ok() ) { 
-                DiskLoc dl = cc->currLoc(); 
-                /*if ( ! isLargeChunk ) 
-                { 
-                    scoped_spinlock lk( _trackerLocks ); */
-                    _cloneLocs.insert( dl ); 
-                //} 
-                cc->advance(); 
-
-                // we can afford to yield here because any change to the base data that we might miss is already being 
-                // queued and will be migrated in the 'transferMods' stage 
-                if ( ! cc->yieldSometimes( ClientCursor::DontNeed ) ) { 
-                    cc.release(); 
-                    break; 
-                } 
-
-                /*if ( ++recCount > maxRecsWhenFull ) { 
-                    isLargeChunk = true; 
-                }*/ 
-            }
-			log() << "[MYCODE] Number of cloned locs:" << _cloneLocs.size() << endl;
-			log() << "[MYCODE_TRANSFER] COLLECT END" << t.millis() << endl;
-
-            int allocSize; 
-            { 
-                Client::ReadContext ctx( ns ); 
-                NamespaceDetails *d = nsdetails( ns.c_str() ); 
-                verify( d ); 
-                //scoped_spinlock lk( _trackerLocks ); 
-                allocSize = std::min(BSONObjMaxUserSize, (int)((12 + d->averageObjectSize()) * _cloneLocs.size())); 
-            } 
-            BSONArrayBuilder a (allocSize); 
-             
-            while ( 1 ) { 
-                bool filledBuffer = false; 
-                 
-                auto_ptr<LockMongoFilesShared> fileLock; 
-                Record* recordToTouch = 0; 
-
-                { 
-                    Client::ReadContext ctx( ns ); 
-                    //scoped_spinlock lk( _trackerLocks ); 
-                    set<DiskLoc>::iterator i = _cloneLocs.begin(); 
-                    for ( ; i!=_cloneLocs.end(); ++i ) { 
-                        DiskLoc dl = *i; 
-                         
-                        Record* r = dl.rec(); 
-                        if ( ! r->likelyInPhysicalMemory() ) { 
-                            fileLock.reset( new LockMongoFilesShared() ); 
-                            recordToTouch = r; 
-                            break; 
-                        } 
-                         
-                        BSONObj o = dl.obj(); 
-				        //log() << "[MYCODE] DATA: " << o.toString() << rsLog;
-                         
-                        // use the builder size instead of accumulating 'o's size so that we take into consideration 
-                        // the overhead of BSONArray indices 
-                        if ( a.len() + o.objsize() + 1024 > BSONObjMaxUserSize ) { 
-                            filledBuffer = true; // break out of outer while loop 
-                            break; 
-                        } 
-                         
-                        a.append( o ); 
-                    } 
-                     
-                    _cloneLocs.erase( _cloneLocs.begin() , i ); 
-                     
-                    if ( _cloneLocs.empty() || filledBuffer ) 
-                        break; 
-                } 
-                 
-                if ( recordToTouch ) { 
-                    // its safe to touch here because we have a LockMongoFilesShared 
-                    // we can't do where we get the lock because we would have to unlock the main readlock and tne _trackerLocks 
-                    // simpler to handle this out there 
-                    recordToTouch->touch(); 
-                    recordToTouch = 0; 
-                } 
-                 
-            } 
-			log() << "[MYCODE_TRANSFER] DATA COPY END" << t.millis() << endl;
-
-            result.appendArray( "objects" , a.arr() ); 
-            return true; 
-        }              
-    }fetchDataCmd;
 
     bool ShardingState::inCriticalMigrateSection() {
         return migrateFromStatus.getInCriticalSection();
