@@ -1,3 +1,32 @@
+//Illinois Open Source License
+//
+//University of Illinois
+//Open Source License
+//
+//Copyright © 2014,    Board of Trustees of the University of Illinois.  All rights reserved.
+//
+//Developed by:
+//
+// Distributed Protocols Research Group in the Department of Computer Science
+// The University of Illinois at Urbana-Champaign
+// http://dprg.cs.uiuc.edu/
+// This is for the Project Morphus. The paper can be found at the website http://dprg.cs.uiuc.edu
+//Mainak Ghosh, mghosh4@illinois.edu
+//Wenting Wang, wwang84@illinois.edu
+//Gopalakrishna Holla, vgkholla@gmail.com
+//Indranil Gupta, indy@cs.uiuc.edu
+//
+//Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal with the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+//
+//    * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimers.
+//    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimers in the documentation and/or other materials provided with the distribution.
+//    * Neither the names of The Distributed Protocols Research Group (DPRG) or The University of Illinois at Urbana-Champaign, nor the names of its contributors may be used to endorse or promote products derived from this Software without specific prior written permission.
+//
+//THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+//PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+//AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
+
+
 sh = function() { return "try sh.help();" }
 
 sh._checkMongos = function() {
@@ -35,7 +64,7 @@ sh.help = function() {
     print( "\tsh.addShard( host )                       server:port OR setname/server:port" )
     print( "\tsh.enableSharding(dbname)                 enables sharding on the database dbname" )
     print( "\tsh.shardCollection(fullName,key,unique)   shards the collection" );
-    print( "\tsh.reShardCollection(fullName,key,loadbalance,unique) reshards the collection" );
+    print( "\tsh.reShardCollection(fullName,key,unique,loadBalance,multithread) reshards the collection" );
 
     print( "\tsh.splitFind(fullName,find)               splits the chunk that find is in at the median" );
     print( "\tsh.splitAt(fullName,middle)               splits the chunk that middle is in at middle" );
@@ -78,17 +107,18 @@ sh.shardCollection = function( fullName , key , unique ) {
     return sh._adminCommand( cmd );
 }
 
-sh.reShardCollection = function( fullName , key , loadbalance, unique ) {
+sh.reShardCollection = function( fullName , key , unique , loadBalance , numThreads ) {
     sh._checkFullName( fullName )
     assert( key , "need a key" )
     assert( typeof( key ) == "object" , "key needs to be an object" )
     
-    var cmd = { reShardCollection : fullName , key : key }
+    var cmd = { reShardCollection : fullName , key : key , multithread: numThreads }
     if ( unique ) 
         cmd.unique = true;
-
-    if (loadbalance)
+    if ( loadBalance ) 
         cmd.loadBalance = true;
+    //if ( multithread ) 
+    //    cmd.multithread = true;
 
     return sh._adminCommand( cmd );
 }

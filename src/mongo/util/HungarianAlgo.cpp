@@ -1,3 +1,32 @@
+//Illinois Open Source License
+//
+//University of Illinois
+//Open Source License
+//
+//Copyright © 2014,    Board of Trustees of the University of Illinois.  All rights reserved.
+//
+//Developed by:
+//
+// Distributed Protocols Research Group in the Department of Computer Science
+// The University of Illinois at Urbana-Champaign
+// http://dprg.cs.uiuc.edu/
+// This is for the Project Morphus. The paper can be found at the website http://dprg.cs.uiuc.edu
+//Mainak Ghosh, mghosh4@illinois.edu
+//Wenting Wang, wwang84@illinois.edu
+//Gopalakrishna Holla, vgkholla@gmail.com
+//Indranil Gupta, indy@cs.uiuc.edu
+//
+//Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal with the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+//
+//    * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimers.
+//    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimers in the documentation and/or other materials provided with the distribution.
+//    * Neither the names of The Distributed Protocols Research Group (DPRG) or The University of Illinois at Urbana-Champaign, nor the names of its contributors may be used to endorse or promote products derived from this Software without specific prior written permission.
+//
+//THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+//PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+//AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
+
+
 #include "HungarianAlgo.h"
 
 #include <iostream>
@@ -59,7 +88,7 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
         }
     }
     if (numRow != numColumn ){
-    int smaller=numRow>numColumn?numColumn:numRow;
+	int smaller=numRow>numColumn?numColumn:numRow;
        //find the largest number in the matrix
        int max_cost = datainkr[0][0];
        for (int r = 0;r<numRow;r++)
@@ -72,19 +101,18 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
            }
        }
     }
-    #ifdef DEBUG
-    std::cout << "Cost input matrix:" << std::endl;
-      for (  int row = 0 ; row < nrow ; row++ ) {
-        for (  int col = 0 ; col < ncol ; col++ ) {
-          std::cout.width(8);
-          std::cout << cost[row][col] << ",";
+	#ifdef DEBUG
+	std::cout << "Cost input matrix:" << std::endl;
+	  for (  int row = 0 ; row < nrow ; row++ ) {
+	    for (  int col = 0 ; col < ncol ; col++ ) {
+	      std::cout.width(8);
+	      std::cout << cost[row][col] << ",";
               
-        }
-        std::cout << std::endl;
-      }
-      std::cout << std::endl;
-    #endif
-
+            }
+	    std::cout << std::endl;
+          }
+	  std::cout << std::endl;
+	#endif
    
     mask = new int *[nrow];
     path = new int *[2 * nrow +1];
@@ -104,7 +132,7 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     for (int i = 0; i < nrow; i++)
     {
         mask[i] = new int[ncol];
-    
+
     }
     
     for (int i = 0; i < nrow; i++)
@@ -130,12 +158,12 @@ void HungarianAlgo::min_cost_assignment(long long **datainkr, int numRow, int nu
     main_algorithm(result);
     if(flip){
         for(int c = 0;c<numColumn;c++){
-         assignment[result[c]]=c;
+            assignment[result[c]]=c;
         }
     } else {
         for(int c = 0;c<numRow;c++){
-         assignment[c]=result[c];
-        }
+	     assignment[c]=result[c];
+      }
     }
    delete result;
 }
@@ -347,7 +375,7 @@ void HungarianAlgo::find_a_zero(int* row, int* col)
                   done = true;
              }
          c += 1;
-             if(c>=ncol ||done )
+        if(c>=ncol ||done )
                 break;
          }
          r+=1;
@@ -377,7 +405,7 @@ void HungarianAlgo::find_star_in_row(int row, int* col)
         if(mask[row][c]==1)
         {
             *col = c;
-    }
+        }
     }
 }
 void HungarianAlgo::step_five(int* step)

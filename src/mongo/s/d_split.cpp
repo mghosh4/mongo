@@ -15,6 +15,33 @@
 *    You should have received a copy of the GNU Affero General Public License
 *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+//Illinois Open Source License
+//
+//University of Illinois
+//Open Source License
+//
+//Copyright © 2014,    Board of Trustees of the University of Illinois.  All rights reserved.
+//
+//Developed by:
+//
+// Distributed Protocols Research Group in the Department of Computer Science
+// The University of Illinois at Urbana-Champaign
+// http://dprg.cs.uiuc.edu/
+// This is for the Project Morphus. The paper can be found at the website http://dprg.cs.uiuc.edu
+//Mainak Ghosh, mghosh4@illinois.edu
+//Wenting Wang, wwang84@illinois.edu
+//Gopalakrishna Holla, vgkholla@gmail.com
+//Indranil Gupta, indy@cs.uiuc.edu
+//
+//Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal with the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+//
+//    * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimers.
+//    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimers in the documentation and/or other materials provided with the distribution.
+//    * Neither the names of The Distributed Protocols Research Group (DPRG) or The University of Illinois at Urbana-Champaign, nor the names of its contributors may be used to endorse or promote products derived from this Software without specific prior written permission.
+//
+//THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+//PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+//AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE SOFTWARE.
 
 #include "pch.h"
 
@@ -185,7 +212,7 @@ namespace mongo {
     class SplitVector : public Command {
     public:
         SplitVector() : Command( "splitVector" , false ) {}
-        virtual bool slaveOk() const { return false; }
+        virtual bool slaveOk() const { return true; }
         virtual LockType locktype() const { return NONE; }
         virtual void help( stringstream &help ) const {
             help <<
@@ -213,13 +240,19 @@ namespace mongo {
             // 1.a We'll parse the parameters in two steps. First, make sure the we can use the split index to get
             //     a good approximation of the size of the chunk -- without needing to access the actual data.
             //
-
-            cout << "[MYCODE] SplitVector Checkpoint 1\n";
+	    BSONElement reShardElem1 = jsobj[ "reShard" ];
+            log()<< "[WWT Split] reShard = " << reShardElem1.ok()<<endl;
+            //log()<< "[WWT] reShard = " << reShardElem1.Bool()<<endl;
+            BSONElement subSplitElem = jsobj[ "subSplit" ];
+	    log()<< "[WWT Split] subSplit = " << subSplitElem.ok()<<endl;
+            //log()<< "[WWT] subSplit = " << subSplitElem.Bool()<<endl;
+            //cout << "[MYCODE] SplitVector Checkpoint 1\n";
             const char* ns = jsobj.getStringField( "splitVector" );
             BSONObj keyPattern = jsobj.getObjectField( "keyPattern" );
 
             if ( keyPattern.isEmpty() ) {
                 errmsg = "no key pattern found in splitVector";
+                log()<<"no key pattern found in splitVector"<<endl;
                 return false;
             }
 
@@ -228,6 +261,7 @@ namespace mongo {
             BSONObj max = jsobj.getObjectField( "max" );
             if ( min.isEmpty() != max.isEmpty() ){
                 errmsg = "either provide both min and max or leave both empty";
+                log()<<"either provide both min and max or leave both empty"<<endl;
                 return false;
             }
 
@@ -246,7 +280,7 @@ namespace mongo {
             vector<BSONObj> splitKeys;
 
             {
-                cout << "[MYCODE] SplitVector Checkpoint 2\n";
+                //cout << "[MYCODE] SplitVector Checkpoint 2\n";
                 // Get the size estimate for this namespace
                 Client::ReadContext ctx( ns );
                 NamespaceDetails *d = nsdetails( ns );
@@ -315,9 +349,11 @@ namespace mongo {
                 
                 
                 // If there's not enough data for more than one chunk, no point continuing.
-                cout << "[MYCODE] SplitVector Checkpoint 3\t recCount:" << recCount << "\tdataSize:" << dataSize << "\tmaxChunkSize:" << maxChunkSize << endl;
+                //cout << "[MYCODE] SplitVector Checkpoint 3\t recCount:" << recCount << "\tdataSize:" << dataSize << "\tmaxChunkSize:" << maxChunkSize << endl;
+		
+
                 BSONElement reShardElem = jsobj[ "reShard" ];
-                if ( (!reShardElem.ok() &&  dataSize < maxChunkSize) || recCount == 0 ) {
+                if ( (!reShardElem.ok() && !subSplitElem.ok() &&  dataSize < maxChunkSize) || recCount == 0 ) {
                     vector<BSONObj> emptyVector;
                     result.append( "splitKeys" , emptyVector );
                     return true;
@@ -336,7 +372,23 @@ namespace mongo {
                     keyCount = maxChunkObjects;
                 }
                 cout << "[MYCODE] Avg Record Size:" << avgRecSize << "\tKey Count:" << keyCount << endl;
-                
+
+                if(subSplitElem.ok()){
+                    //log() << "[MYCODE] SplitVector Checkpoint 6" << endl;
+                    
+                    BSONObj range = jsobj.getObjectField( "range" );
+                    log() << "[WWT  Split] Range:" << range.toString() << endl;
+                   
+                    scoped_ptr<DBDirectClient> direct;
+                    DBClientBase * conn;
+                    direct.reset( new DBDirectClient() );
+                    conn = direct.get();
+                    BSONObj qRange = range.getOwned();
+                    long long count=conn->count(ns,qRange);
+                    keyCount = count / maxSplitPoints;
+                    log() << "[WWT Split] keyCount = "<< keyCount << "with count "<<count <<"/ maxSplitPoints "<<maxSplitPoints<<endl;
+                }
+
                 //
                 // 2. Traverse the index and add the keyCount-th key to the result vector. If that key
                 //    appeared in the vector before, we omit it. The invariant here is that all the
@@ -347,7 +399,7 @@ namespace mongo {
                 long long currCount = 0;
                 long long numChunks = 0;
                 
-                cout << "[MYCODE] SplitVector Checkpoint 4\n";
+                //cout << "[MYCODE] SplitVector Checkpoint 4\n";
                 BtreeCursor * bc = BtreeCursor::make( d, *idx, min, max, false, 1 );
                 shared_ptr<Cursor> c( bc );
                 auto_ptr<ClientCursor> cc( new ClientCursor( QueryOption_NoCursorTimeout , c , ns ) );
@@ -403,7 +455,7 @@ namespace mongo {
                         }
                     }
 
-                    cout << "[MYCODE] SplitVector finished" << endl;
+                    cout << "[WWT Split] SplitVector finished" << endl;
                     
                     if ( splitKeys.size() > 1 || ! force )
                         break;
@@ -423,7 +475,7 @@ namespace mongo {
                 //    index
                 //
                 
-                cout << "[MYCODE] SplitVector Checkpoint 5\n";
+                //cout << "[MYCODE] SplitVector Checkpoint 5\n";
                 // Warn for keys that are more numerous than maxChunkSize allows.
                 for ( set<BSONObj>::const_iterator it = tooFrequentKeys.begin(); it != tooFrequentKeys.end(); ++it ) {
                     warning() << "chunk is larger than " << maxChunkSize
@@ -493,7 +545,7 @@ namespace mongo {
                  " { splitChunk:\"db.foo\" , keyPattern: {a:1} , min : {a:100} , max: {a:200} { splitKeys : [ {a:150} , ... ]}";
         }
 
-        virtual bool slaveOk() const { return false; }
+        virtual bool slaveOk() const { return true; }
         virtual bool adminOnly() const { return true; }
         virtual LockType locktype() const { return NONE; }
         virtual void addRequiredPrivileges(const std::string& dbname,
